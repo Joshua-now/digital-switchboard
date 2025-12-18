@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id               String   @id @default(uuid())
+  name             String
+  status           ClientStatus @default(ACTIVE)
+  timezone         String   @default("America/New_York")
+  quietHoursStart  String   @default("20:00")
+  quietHoursEnd    String   @default("08:00")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  routingConfigs   RoutingConfig[]
+  leads            Lead[]
+  calls            Call[]
+  auditLogs        AuditLog[]
+
+  @@map("clients")
+}
+
+model RoutingConfig {
+  id                 String   @id @default(uuid())
+  clientId           String
+  provider           CallProvider @default(BLAND)
+  active             Boolean  @default(true)
+  callWithinSeconds  Int      @default(60)
+  instructions       String   @db.Text
+  questions          Json?
+  transferNumber     String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  client             Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("routing_configs")
+}
+
+model Lead {
+  id           String      @id @default(uuid())
+  clientId     String
+  firstName    String?
+  lastName     String?
+  phone        String
+  email        String?
+  source       String?
+  payloadJson  Json
+  dedupeKey    String
+  callStatus   CallStatus  @default(NEW)
+  skipReason   String?
+  createdAt    DateTime    @default(now())
+
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  calls        Call[]
+
+  @@unique([clientId, dedupeKey])
+  @@map("leads")
+}
+
+model Call {
+  id                    String      @id @default(uuid())
+  clientId              String
+  leadId                String
+  provider              CallProvider @default(BLAND)
+  providerCallId        String?     @unique
+  status                CallStatusEnum @default(CREATED)
+  outcome               String?
+  transcript            String?     @db.Text
+  recordingUrl          String?
+  rawProviderPayload    Json?
+  startedAt             DateTime?
+  endedAt               DateTime?
+  createdAt             DateTime    @default(now())
+
+  client                Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lead                  Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("calls")
+}
+
+model AuditLog {
+  id          String    @id @default(uuid())
+  clientId    String?
+  eventType   String
+  message     String    @db.Text
+  dataJson    Json?
+  createdAt   DateTime  @default(now())
+
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CallProvider {
+  BLAND
+}
+
+enum CallStatus {
+  NEW
+  QUEUED
+  CALLING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum CallStatusEnum {
+  CREATED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
