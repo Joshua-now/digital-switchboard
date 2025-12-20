@@ -37,14 +37,7 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-      <Route
-        path="/clients/:id"
-        element={
-          <PrivateRoute>
-            <ClientDetail />
-          </PrivateRoute>
-        }
-      />
+     <Route path="/" element={<Navigate to="/login" replace />} /> 
       <Route
         path="/leads"
         element={
