@@ -15,9 +15,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: true,
   credentials: true,
 }));
+
 
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
@@ -56,18 +57,26 @@ app.get('/health', async (req, res) => {
 
 app.use('/webhook', webhookLimiter, webhookRouter);
 app.use('/api', apiLimiter, apiRouter);
+
+/**
+ * API 404s only (do NOT block frontend routes)
+ */
+app.use('/api', notFoundHandler);
+app.use('/webhook', notFoundHandler);
+
+/**
+ * Serve built frontend (Vite) + SPA fallback
+ */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve built frontend (Vite)
 const clientDistPath = path.join(__dirname, "../dist");
 app.use(express.static(clientDistPath));
 
-// SPA fallback
 app.get("*", (_req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));
 });
-app.use(notFoundHandler);
+
 app.use(errorHandler);
 
 async function startServer() {
@@ -75,9 +84,7 @@ async function startServer() {
     const dbHealthy = await checkDatabaseConnection();
     if (!dbHealthy) {
       console.error('Database connection failed. Server may not function correctly.');
-    
-
-
+    }
 
     app.listen(PORT, () => {
       console.log(`Digital Switchboard API running on port ${PORT}`);
