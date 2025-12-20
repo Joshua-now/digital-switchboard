@@ -63,6 +63,20 @@ async function startServer() {
     if (!dbHealthy) {
       console.error('Database connection failed. Server may not function correctly.');
     }
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve built frontend (Vite)
+const clientDistPath = path.join(__dirname, "../dist");
+app.use(express.static(clientDistPath));
+
+// SPA fallback
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(clientDistPath, "index.html"));
+});
 
     app.listen(PORT, () => {
       console.log(`Digital Switchboard API running on port ${PORT}`);
