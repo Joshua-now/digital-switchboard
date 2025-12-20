@@ -7,6 +7,9 @@ import { checkDatabaseConnection } from './lib/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import webhookRouter from './routes/webhook.js';
 import apiRouter from './routes/api.js';
+import path from "path";
+import { fileURLToPath } from "url";
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,19 +56,6 @@ app.get('/health', async (req, res) => {
 
 app.use('/webhook', webhookLimiter, webhookRouter);
 app.use('/api', apiLimiter, apiRouter);
-
-app.use(notFoundHandler);
-app.use(errorHandler);
-
-async function startServer() {
-  try {
-    const dbHealthy = await checkDatabaseConnection();
-    if (!dbHealthy) {
-      console.error('Database connection failed. Server may not function correctly.');
-    }
-import path from "path";
-import { fileURLToPath } from "url";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -77,6 +67,17 @@ app.use(express.static(clientDistPath));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));
 });
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+async function startServer() {
+  try {
+    const dbHealthy = await checkDatabaseConnection();
+    if (!dbHealthy) {
+      console.error('Database connection failed. Server may not function correctly.');
+    
+
+
 
     app.listen(PORT, () => {
       console.log(`Digital Switchboard API running on port ${PORT}`);
