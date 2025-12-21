@@ -15,6 +15,13 @@ router.post('/auth/login', async (req: AuthRequest, res: Response) => {
 
   const token = await authenticateAdmin(email, password);
   if (!token) {
+    console.log("LOGIN DEBUG", {
+  enteredEmail: email,
+  envAdminEmail: process.env.ADMIN_EMAIL,
+  hasAdminHash: !!process.env.ADMIN_PASSWORD_HASH,
+  adminHashPrefix: (process.env.ADMIN_PASSWORD_HASH || "").slice(0, 7),
+  adminHashLen: (process.env.ADMIN_PASSWORD_HASH || "").length,
+});
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
