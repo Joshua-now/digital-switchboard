@@ -13,18 +13,18 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   };
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    (headers as any)['Authorization'] = `Bearer ${token}`;
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...fetchOptions,
     headers,
-    credentials: 'include',
+    credentials: 'include', // 🔑 REQUIRED FOR LOGIN
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || 'Request failed');
+    throw new Error((error as any).error || 'Request failed');
   }
 
   return response.json();
@@ -37,10 +37,15 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
-    logout: (token: string) =>
-      fetchApi('/auth/logout', { method: 'POST', token }),
-    me: (token: string) => fetchApi('/auth/me', { token }),
+
+    logout: () =>
+      fetchApi('/auth/logout', {
+        method: 'POST',
+      }),
+
+    me: () => fetchApi('/auth/me'),
   },
+
   clients: {
     list: (token: string) => fetchApi('/clients', { token }),
     get: (id: string, token: string) => fetchApi(`/clients/${id}`, { token }),
@@ -67,8 +72,12 @@ export const api = {
         token,
       }),
   },
+
   leads: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }, token: string) => {
+    list: (
+      params: { clientId?: string; limit?: number; offset?: number },
+      token: string
+    ) => {
       const query = new URLSearchParams();
       if (params.clientId) query.set('clientId', params.clientId);
       if (params.limit) query.set('limit', String(params.limit));
@@ -77,8 +86,12 @@ export const api = {
     },
     get: (id: string, token: string) => fetchApi(`/leads/${id}`, { token }),
   },
+
   calls: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }, token: string) => {
+    list: (
+      params: { clientId?: string; limit?: number; offset?: number },
+      token: string
+    ) => {
       const query = new URLSearchParams();
       if (params.clientId) query.set('clientId', params.clientId);
       if (params.limit) query.set('limit', String(params.limit));
@@ -86,8 +99,12 @@ export const api = {
       return fetchApi(`/calls?${query}`, { token });
     },
   },
+
   auditLogs: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }, token: string) => {
+    list: (
+      params: { clientId?: string; limit?: number; offset?: number },
+      token: string
+    ) => {
       const query = new URLSearchParams();
       if (params.clientId) query.set('clientId', params.clientId);
       if (params.limit) query.set('limit', String(params.limit));
@@ -96,3 +113,5 @@ export const api = {
     },
   },
 };
+
+export default api;
