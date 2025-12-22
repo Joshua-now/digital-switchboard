@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Phone } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+const navigate = useNavigate();
+
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -8,19 +11,30 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  login: (email: string, password: string) => Promise<boolean>;
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    try {
-      await login(email, password);
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
-    }
+  try {
+  const ok = await login(email, password);
+
+  if (!ok) {
+    setError('Login failed');
+    return;
+  }
+
+  // ✅ redirect after successful login (pick your actual post-login route)
+  navigate('/');
+} catch (err: any) {
+  setError(err?.message || 'Login failed');
+} finally {
+  setLoading(false);
+}
+
   };
 
   return (
