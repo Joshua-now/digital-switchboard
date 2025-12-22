@@ -57,18 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   };
 
-  const logout = async () => {
-    if (token) {
-      try {
-        await api.auth.logout(token);
-      } catch (error) {
-        console.error('Logout error:', error);
-      }
-    }
+ const logout = async () => {
+  setLoading(true);
+  try {
+    await api.auth.logout();
+  } catch (err) {
+    console.error("LOGOUT FAILED", err);
+  } finally {
     setUser(null);
-    setToken(null);
-    localStorage.removeItem('token');
-  };
+    setLoading(false);
+  }
+};
+
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, logout }}>
