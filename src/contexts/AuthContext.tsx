@@ -41,6 +41,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+  const login = async (email: string, password: string) => {
+  console.log("AUTH: submitting login", { email });
+
+  const result = await api.auth.login(email, password);
+  console.log("AUTH: login result", result);
+
+  const me = await api.auth.me();
+  console.log("AUTH: me after login", me);
+
+  // keep the rest of your logic exactly as-is
+};
+
 
   const login = async (email: string, password: string) => {
     const data = await api.auth.login(email, password);
