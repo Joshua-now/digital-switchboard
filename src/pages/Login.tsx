@@ -11,7 +11,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
-  login: (email: string, password: string) => Promise<boolean>;
+  
 
 
   const handleSubmit = async (e: React.FormEvent) => {
