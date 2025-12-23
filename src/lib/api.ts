@@ -1,10 +1,10 @@
 const API_BASE = '/api';
 
-interface FetchOptions extends RequestInit {
-  token?: string;
-}
+type FetchApiOptions = RequestInit & {
+  token?: string | null;
+};
 
-async function fetchApi(endpoint: string, options: FetchOptions = {}) {
+async function fetchApi<T = any>(endpoint: string, options: FetchApiOptions = {}): Promise<T> {
   const { token, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
@@ -12,106 +12,85 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     ...(fetchOptions.headers || {}),
   };
 
+  // Optional bearer support (keep it, but cookies are primary)
   if (token) {
-    (headers as any)['Authorization'] = `Bearer ${token}`;
+    (headers as any).Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(`${API_BASE}${endpoint}`, {
     ...fetchOptions,
     headers,
-    credentials: 'include', // 🔑 REQUIRED FOR LOGIN
+    credentials: 'include', // IMPORTANT: sends cookie
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error((error as any).error || 'Request failed');
+  // Try to parse JSON either way
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const message = (data as any)?.error || `Request failed (${res.status})`;
+    throw new Error(message);
   }
 
-  return response.json();
+  return data as T;
 }
 
 export const api = {
   auth: {
     login: (email: string, password: string) =>
-      fetchApi('/auth/login', {
+      fetchApi<{ success: boolean; token: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
 
     logout: () =>
-      fetchApi('/auth/logout', {
+      fetchApi<{ success: boolean }>('/auth/logout', {
         method: 'POST',
       }),
 
-    me: () => fetchApi('/auth/me'),
+    me: () => fetchApi<{ user: { email: string; isAdmin: boolean } }>('/auth/me'),
   },
 
   clients: {
-    list: (token: string) => fetchApi('/clients', { token }),
-    get: (id: string, token: string) => fetchApi(`/clients/${id}`, { token }),
-    create: (data: any, token: string) =>
-      fetchApi('/clients', {
-        method: 'POST',
-        body: JSON.stringify(data),
-        token,
-      }),
-    update: (id: string, data: any, token: string) =>
-      fetchApi(`/clients/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-        token,
-      }),
-    delete: (id: string, token: string) =>
-      fetchApi(`/clients/${id}`, { method: 'DELETE', token }),
-    getRoutingConfig: (id: string, token: string) =>
-      fetchApi(`/clients/${id}/routing-config`, { token }),
-    saveRoutingConfig: (id: string, data: any, token: string) =>
-      fetchApi(`/clients/${id}/routing-config`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-        token,
-      }),
+    list: () => fetchApi('/clients'),
+    get: (id: string) => fetchApi(`/clients/${id}`),
+    create: (body: any) =>
+      fetchApi('/clients', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: any) =>
+      fetchApi(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id: string) => fetchApi(`/clients/${id}`, { method: 'DELETE' }),
+    getRoutingConfig: (id: string) => fetchApi(`/clients/${id}/routing-config`),
+    saveRoutingConfig: (id: string, body: any) =>
+      fetchApi(`/clients/${id}/routing-config`, { method: 'POST', body: JSON.stringify(body) }),
   },
 
   leads: {
-    list: (
-      params: { clientId?: string; limit?: number; offset?: number },
-      token: string
-    ) => {
-      const query = new URLSearchParams();
-      if (params.clientId) query.set('clientId', params.clientId);
-      if (params.limit) query.set('limit', String(params.limit));
-      if (params.offset) query.set('offset', String(params.offset));
-      return fetchApi(`/leads?${query}`, { token });
+    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
+      const q = new URLSearchParams();
+      if (params.clientId) q.set('clientId', params.clientId);
+      if (params.limit) q.set('limit', String(params.limit));
+      if (params.offset) q.set('offset', String(params.offset));
+      return fetchApi(`/leads?${q.toString()}`);
     },
-    get: (id: string, token: string) => fetchApi(`/leads/${id}`, { token }),
+    get: (id: string) => fetchApi(`/leads/${id}`),
   },
 
   calls: {
-    list: (
-      params: { clientId?: string; limit?: number; offset?: number },
-      token: string
-    ) => {
-      const query = new URLSearchParams();
-      if (params.clientId) query.set('clientId', params.clientId);
-      if (params.limit) query.set('limit', String(params.limit));
-      if (params.offset) query.set('offset', String(params.offset));
-      return fetchApi(`/calls?${query}`, { token });
+    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
+      const q = new URLSearchParams();
+      if (params.clientId) q.set('clientId', params.clientId);
+      if (params.limit) q.set('limit', String(params.limit));
+      if (params.offset) q.set('offset', String(params.offset));
+      return fetchApi(`/calls?${q.toString()}`);
     },
   },
 
   auditLogs: {
-    list: (
-      params: { clientId?: string; limit?: number; offset?: number },
-      token: string
-    ) => {
-      const query = new URLSearchParams();
-      if (params.clientId) query.set('clientId', params.clientId);
-      if (params.limit) query.set('limit', String(params.limit));
-      if (params.offset) query.set('offset', String(params.offset));
-      return fetchApi(`/audit-logs?${query}`, { token });
+    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
+      const q = new URLSearchParams();
+      if (params.clientId) q.set('clientId', params.clientId);
+      if (params.limit) q.set('limit', String(params.limit));
+      if (params.offset) q.set('offset', String(params.offset));
+      return fetchApi(`/audit-logs?${q.toString()}`);
     },
   },
 };
-
-export default api;
