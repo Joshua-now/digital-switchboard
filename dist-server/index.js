@@ -1,4 +1,5 @@
 import express from 'express';
+import 'dotenv/config';
 import cors from 'cors';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
@@ -7,10 +8,13 @@ import { checkDatabaseConnection } from './lib/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import webhookRouter from './routes/webhook.js';
 import apiRouter from './routes/api.js';
+import path from "path";
+import { fileURLToPath } from "url";
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: true,
     credentials: true,
 }));
 app.use(morgan('combined'));
@@ -46,7 +50,21 @@ app.get('/health', async (req, res) => {
 });
 app.use('/webhook', webhookLimiter, webhookRouter);
 app.use('/api', apiLimiter, apiRouter);
-app.use(notFoundHandler);
+/**
+ * API 404s only (do NOT block frontend routes)
+ */
+app.use('/api', notFoundHandler);
+app.use('/webhook', notFoundHandler);
+/**
+ * Serve built frontend (Vite) + SPA fallback
+ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.join(__dirname, "../dist");
+app.use(express.static(clientDistPath));
+app.get("*", (_req, res) => {
+    res.sendFile(path.join(clientDistPath, "index.html"));
+});
 app.use(errorHandler);
 async function startServer() {
     try {

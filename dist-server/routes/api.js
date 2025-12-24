@@ -11,13 +11,20 @@ router.post('/auth/login', async (req, res) => {
     }
     const token = await authenticateAdmin(email, password);
     if (!token) {
+        console.log("LOGIN DEBUG", {
+            enteredEmail: email,
+            envAdminEmail: process.env.ADMIN_EMAIL,
+            hasAdminHash: !!process.env.ADMIN_PASSWORD_HASH,
+            adminHashPrefix: (process.env.ADMIN_PASSWORD_HASH || "").slice(0, 7),
+            adminHashLen: (process.env.ADMIN_PASSWORD_HASH || "").length,
+        });
         res.status(401).json({ error: 'Invalid credentials' });
         return;
     }
     res.cookie('token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     res.json({ success: true, token });

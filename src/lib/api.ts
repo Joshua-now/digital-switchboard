@@ -1,96 +1,215 @@
-const API_BASE = '/api';
+// src/lib/api.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-type FetchApiOptions = RequestInit & {
-  token?: string | null;
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export type ApiErrorShape = {
+  error?: string;
+  message?: string;
+  details?: any;
 };
 
-async function fetchApi<T = any>(endpoint: string, options: FetchApiOptions = {}): Promise<T> {
-  const { token, ...fetchOptions } = options;
+export class ApiError extends Error {
+  status: number;
+  data?: ApiErrorShape | any;
 
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(fetchOptions.headers || {}),
+  constructor(message: string, status: number, data?: any) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
+/**
+ * Base URL strategy:
+ * - In dev, Vite proxy routes /api -> backend :3000, so we can call relative paths.
+ * - In prod (Railway), the backend typically serves the same origin, so relative paths still work.
+ *
+ * If you ever want to force an absolute API origin, set:
+ *   VITE_API_ORIGIN=https://your-domain.com
+ * and this file will prefix requests with it.
+ */
+const API_ORIGIN = (import.meta as any).env?.VITE_API_ORIGIN?.toString()?.trim() || "";
+const withOrigin = (path: string) => {
+  if (!API_ORIGIN) return path;
+  // Ensure we don't double-prefix
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${API_ORIGIN}${path.startsWith("/") ? "" : "/"}${path}`;
+};
+
+function isJsonResponse(res: Response) {
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json");
+}
+
+/**
+ * Core fetch wrapper. Always includes credentials so cookie-based auth works.
+ */
+async function fetchApi<T>(
+  path: string,
+  options: {
+    method?: HttpMethod;
+    body?: any;
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+  } = {}
+): Promise<T> {
+  const method = options.method ?? "GET";
+  const headers: Record<string, string> = {
+    ...(options.headers || {}),
   };
 
-  // Optional bearer support (keep it, but cookies are primary)
-  if (token) {
-    (headers as any).Authorization = `Bearer ${token}`;
+  let body: BodyInit | undefined;
+
+  if (options.body !== undefined) {
+    // If it's already FormData, let the browser set the content-type boundary.
+    if (options.body instanceof FormData) {
+      body = options.body;
+    } else {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      body = headers["Content-Type"].includes("application/json")
+        ? JSON.stringify(options.body)
+        : (options.body as BodyInit);
+    }
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...fetchOptions,
+  const url = withOrigin(path);
+
+  const res = await fetch(url, {
+    method,
     headers,
-    credentials: 'include', // IMPORTANT: sends cookie
+    body,
+    signal: options.signal,
+    credentials: "include", // IMPORTANT for cookie/session auth
   });
 
-  // Try to parse JSON either way
-  const data = await res.json().catch(() => ({}));
+  let data: any = null;
+  try {
+    if (isJsonResponse(res)) {
+      data = await res.json();
+    } else {
+      data = await res.text();
+    }
+  } catch {
+    // ignore parse errors
+  }
 
   if (!res.ok) {
-    const message = (data as any)?.error || `Request failed (${res.status})`;
-    throw new Error(message);
+    const msg =
+      (data && (data.error || data.message)) ||
+      `Request failed (${res.status})`;
+    throw new ApiError(msg, res.status, data);
   }
 
   return data as T;
 }
 
+/**
+ * Optional helper for "no body" responses.
+ */
+async function fetchNoBody(
+  path: string,
+  options: { method?: HttpMethod; headers?: Record<string, string>; signal?: AbortSignal } = {}
+): Promise<void> {
+  await fetchApi<unknown>(path, options);
+}
+
+/**
+ * Public API surface used throughout the app.
+ *
+ * NOTE: The key fix vs your current setup:
+ *   - auth endpoints are /api/auth/* (NOT /auth/*)
+ * This matches the endpoint you confirmed is working:
+ *   GET /api/auth/me
+ */
 export const api = {
+  // Convenience low-level methods if you want them elsewhere
+  http: {
+    get: <T>(path: string, signal?: AbortSignal) => fetchApi<T>(path, { method: "GET", signal }),
+    post: <T>(path: string, body?: any, signal?: AbortSignal) =>
+      fetchApi<T>(path, { method: "POST", body, signal }),
+    put: <T>(path: string, body?: any, signal?: AbortSignal) =>
+      fetchApi<T>(path, { method: "PUT", body, signal }),
+    patch: <T>(path: string, body?: any, signal?: AbortSignal) =>
+      fetchApi<T>(path, { method: "PATCH", body, signal }),
+    del: <T>(path: string, signal?: AbortSignal) => fetchApi<T>(path, { method: "DELETE", signal }),
+  },
+
   auth: {
+    /**
+     * Returns the currently authenticated user/session.
+     * Your confirmed working response shape:
+     * { user: { email, isAdmin, iat, exp } }
+     */
+    me: () =>
+      fetchApi<{
+        user: {
+          email: string;
+          isAdmin: boolean;
+          iat?: number;
+          exp?: number;
+          [k: string]: any;
+        };
+      }>("/api/auth/me"),
+
+    /**
+     * Login with email/password.
+     * Adjust response shape if your backend returns something else.
+     */
     login: (email: string, password: string) =>
-      fetchApi<{ success: boolean; token: string }>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
+      fetchApi<{
+        success?: boolean;
+        user?: { email: string; isAdmin: boolean; [k: string]: any };
+        [k: string]: any;
+      }>("/api/auth/login", {
+        method: "POST",
+        body: { email, password },
       }),
 
-    logout: () =>
-      fetchApi<{ success: boolean }>('/auth/logout', {
-        method: 'POST',
+    /**
+     * Logout / clear session cookie.
+     */
+    logout: () => fetchNoBody("/api/auth/logout", { method: "POST" }),
+  },
+
+  /**
+   * Health endpoint (you already have a dev proxy for /health).
+   * If your backend exposes /health directly (not under /api), keep as-is.
+   * If your backend exposes /api/health instead, change this to "/api/health".
+   */
+  health: () =>
+    fetchApi<{ status: string; timestamp?: string; database?: string }>("/health"),
+
+  /**
+   * Webhook endpoints (you already proxy /webhook -> backend).
+   * Keep relative so it works in dev + prod.
+   */
+  webhook: {
+    post: <T = any>(path: string, body?: any) =>
+      fetchApi<T>(`/webhook${path.startsWith("/") ? "" : "/"}${path}`, {
+        method: "POST",
+        body,
       }),
-
-    me: () => fetchApi<{ user: { email: string; isAdmin: boolean } }>('/auth/me'),
   },
 
-  clients: {
-    list: () => fetchApi('/clients'),
-    get: (id: string) => fetchApi(`/clients/${id}`),
-    create: (body: any) =>
-      fetchApi('/clients', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: string, body: any) =>
-      fetchApi(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-    delete: (id: string) => fetchApi(`/clients/${id}`, { method: 'DELETE' }),
-    getRoutingConfig: (id: string) => fetchApi(`/clients/${id}/routing-config`),
-    saveRoutingConfig: (id: string, body: any) =>
-      fetchApi(`/clients/${id}/routing-config`, { method: 'POST', body: JSON.stringify(body) }),
-  },
-
-  leads: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
-      const q = new URLSearchParams();
-      if (params.clientId) q.set('clientId', params.clientId);
-      if (params.limit) q.set('limit', String(params.limit));
-      if (params.offset) q.set('offset', String(params.offset));
-      return fetchApi(`/leads?${q.toString()}`);
-    },
-    get: (id: string) => fetchApi(`/leads/${id}`),
-  },
-
+  /**
+   * Calls API (guessable; adjust paths if your backend uses different routes).
+   * If your backend endpoints are under /api/calls, keep these.
+   * If they are under something else, tell me the actual route names and I’ll align them.
+   */
   calls: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
-      const q = new URLSearchParams();
-      if (params.clientId) q.set('clientId', params.clientId);
-      if (params.limit) q.set('limit', String(params.limit));
-      if (params.offset) q.set('offset', String(params.offset));
-      return fetchApi(`/calls?${q.toString()}`);
-    },
-  },
-
-  auditLogs: {
-    list: (params: { clientId?: string; limit?: number; offset?: number }) => {
-      const q = new URLSearchParams();
-      if (params.clientId) q.set('clientId', params.clientId);
-      if (params.limit) q.set('limit', String(params.limit));
-      if (params.offset) q.set('offset', String(params.offset));
-      return fetchApi(`/audit-logs?${q.toString()}`);
-    },
+    list: () => fetchApi<any[]>("/api/calls"),
+    get: (id: string) => fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`),
+    create: (payload: any) => fetchApi<any>("/api/calls", { method: "POST", body: payload }),
+    update: (id: string, payload: any) =>
+      fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    delete: (id: string) =>
+      fetchNoBody(`/api/calls/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
 };
+
+export default api;
