@@ -7,7 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { checkDatabaseConnection } from './lib/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import webhookRouter from './routes/webhook.js';
-import apiRouter from './routes/api.js';
+import apiRouter from './routes/api';
 import path from "path";
 import { fileURLToPath } from "url";
 
