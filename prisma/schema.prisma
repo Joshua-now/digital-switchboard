@@ -1,127 +1,92 @@
-generator client {
-  provider = "prisma-client-js"
-}
+import express, { Response } from 'express';
+import { prisma } from '../lib/db.js';
+import { requireAuth, AuthRequest, authenticateAdmin } from '../middleware/auth.js';
+import { createAuditLog } from '../lib/audit.js';
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+const router = express.Router();
 
-model Client {
-  id              String        @id @default(uuid())
-  name            String
-  status          ClientStatus  @default(ACTIVE)
-  timezone        String        @default("America/New_York")
-  quietHoursStart String        @default("20:00")
-  quietHoursEnd   String        @default("08:00")
+// AUTH
+router.post('/auth/login', async (req: AuthRequest, res: Response) => {
+  const { email, password } = req.body;
 
-  // GoHighLevel sub-account / location mapping (required for multi-client routing)
-  ghlLocationId   String        @unique @map("ghl_location_id")
+  if (!email || !password) {
+    res.status(400).json({ error: 'Email and password required' });
+    return;
+  }
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  const token = await authenticateAdmin(email, password);
+  if (!token) {
+    res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
 
-  routingConfigs  RoutingConfig[]
-  leads           Lead[]
-  calls           Call[]
-  auditLogs       AuditLog[]
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
 
-  @@map("clients")
-}
+  res.json({ success: true });
+});
 
-model RoutingConfig {
-  id                String        @id @default(uuid())
-  clientId          String        @map("client_id")
-  provider          CallProvider  @default(BLAND)
-  active            Boolean       @default(true)
-  callWithinSeconds Int           @default(60) @map("call_within_seconds")
-  instructions      String        @db.Text
-  questions         Json?
-  transferNumber    String?       @map("transfer_number")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+router.post('/auth/logout', requireAuth, (req: AuthRequest, res: Response) => {
+  res.clearCookie('token');
+  res.json({ success: true });
+});
 
-  client            Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+router.get('/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
+  res.json({ user: req.user });
+});
 
-  @@map("routing_configs")
-}
+// CLIENTS
+router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      name,
+      timezone,
+      quietHoursStart,
+      quietHoursEnd,
+      status,
+      ghlLocationId,
+    } = req.body;
 
-model Lead {
-  id          String      @id @default(uuid())
-  clientId    String      @map("client_id")
-  firstName   String?     @map("first_name")
-  lastName    String?     @map("last_name")
-  phone       String
-  email       String?
-  source      String?
-  payloadJson Json        @map("payload_json")
-  dedupeKey   String      @map("dedupe_key")
-  callStatus  CallStatus  @default(NEW) @map("call_status")
-  skipReason  String?     @map("skip_reason")
-  createdAt   DateTime    @default(now()) @map("created_at")
+    if (!name) {
+      res.status(400).json({ error: 'Name is required' });
+      return;
+    }
 
-  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  calls       Call[]
+    const cleanedGhlLocationId =
+      typeof ghlLocationId === 'string' ? ghlLocationId.trim() : '';
 
-  @@unique([clientId, dedupeKey])
-  @@map("leads")
-}
+    if (!cleanedGhlLocationId) {
+      res.status(400).json({ error: 'ghlLocationId is required' });
+      return;
+    }
 
-model Call {
-  id                 String        @id @default(uuid())
-  clientId           String        @map("client_id")
-  leadId             String        @map("lead_id")
-  provider           CallProvider  @default(BLAND)
-  providerCallId     String?       @unique @map("provider_call_id")
-  status             CallStatusEnum @default(CREATED)
-  outcome            String?
-  transcript         String?       @db.Text
-  recordingUrl       String?       @map("recording_url")
-  rawProviderPayload Json?         @map("raw_provider_payload")
-  startedAt          DateTime?     @map("started_at")
-  endedAt            DateTime?     @map("ended_at")
-  createdAt          DateTime      @default(now()) @map("created_at")
+    const client = await prisma.client.create({
+      data: {
+        name,
+        timezone: timezone || 'America/New_York',
+        quietHoursStart: quietHoursStart || '20:00',
+        quietHoursEnd: quietHoursEnd || '08:00',
+        status: status || 'ACTIVE',
+        ghlLocationId: cleanedGhlLocationId,
+      },
+    });
 
-  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  lead               Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+    await createAuditLog('CLIENT_CREATED', `Client created: ${client.name}`, client.id);
 
-  @@map("calls")
-}
+    res.status(201).json(client);
+  } catch (error: any) {
+    console.error('Error creating client:', error);
+    res.status(500).json({
+      error: 'Failed to create client',
+      message: error?.message,
+      code: error?.code,
+      meta: error?.meta,
+    });
+  }
+});
 
-model AuditLog {
-  id        String    @id @default(uuid())
-  clientId  String?   @map("client_id")
-  eventType String    @map("event_type")
-  message   String    @db.Text
-  dataJson  Json?     @map("data_json")
-  createdAt DateTime  @default(now()) @map("created_at")
-
-  client    Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@map("audit_logs")
-}
-
-enum ClientStatus {
-  ACTIVE
-  INACTIVE
-}
-
-enum CallProvider {
-  BLAND
-}
-
-enum CallStatus {
-  NEW
-  QUEUED
-  CALLING
-  COMPLETED
-  FAILED
-  SKIPPED
-}
-
-enum CallStatusEnum {
-  CREATED
-  IN_PROGRESS
-  COMPLETED
-  FAILED
-}
+export default router;

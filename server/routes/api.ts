@@ -42,10 +42,26 @@ router.get('/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
 // CLIENTS
 router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, timezone, quietHoursStart, quietHoursEnd, status } = req.body;
+    const {
+      name,
+      timezone,
+      quietHoursStart,
+      quietHoursEnd,
+      status,
+      ghlLocationId,
+    } = req.body;
 
     if (!name) {
       res.status(400).json({ error: 'Name is required' });
+      return;
+    }
+
+    // Required now that your Prisma schema has ghlLocationId as NOT NULL + UNIQUE
+    const cleanedGhlLocationId =
+      typeof ghlLocationId === 'string' ? ghlLocationId.trim() : '';
+
+    if (!cleanedGhlLocationId) {
+      res.status(400).json({ error: 'ghlLocationId is required' });
       return;
     }
 
@@ -56,6 +72,7 @@ router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => 
         quietHoursStart: quietHoursStart || '20:00',
         quietHoursEnd: quietHoursEnd || '08:00',
         status: status || 'ACTIVE',
+        ghlLocationId: cleanedGhlLocationId,
       },
     });
 
