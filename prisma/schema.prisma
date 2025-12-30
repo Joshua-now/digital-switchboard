@@ -8,91 +8,95 @@ datasource db {
 }
 
 model Client {
-  id               String   @id @default(uuid())
-  name             String
-  status           ClientStatus @default(ACTIVE)
-  timezone         String   @default("America/New_York")
-  quietHoursStart  String   @default("20:00")
-  quietHoursEnd    String   @default("08:00")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String        @id @default(uuid())
+  name            String
+  status          ClientStatus  @default(ACTIVE)
+  timezone        String        @default("America/New_York")
+  quietHoursStart String        @default("20:00")
+  quietHoursEnd   String        @default("08:00")
 
-  routingConfigs   RoutingConfig[]
-  leads            Lead[]
-  calls            Call[]
-  auditLogs        AuditLog[]
+  // GoHighLevel sub-account / location mapping (required for multi-client routing)
+  ghlLocationId   String        @unique @map("ghl_location_id")
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  routingConfigs  RoutingConfig[]
+  leads           Lead[]
+  calls           Call[]
+  auditLogs       AuditLog[]
 
   @@map("clients")
 }
 
 model RoutingConfig {
-  id                 String   @id @default(uuid())
-  clientId           String
-  provider           CallProvider @default(BLAND)
-  active             Boolean  @default(true)
-  callWithinSeconds  Int      @default(60)
-  instructions       String   @db.Text
-  questions          Json?
-  transferNumber     String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                String        @id @default(uuid())
+  clientId          String        @map("client_id")
+  provider          CallProvider  @default(BLAND)
+  active            Boolean       @default(true)
+  callWithinSeconds Int           @default(60) @map("call_within_seconds")
+  instructions      String        @db.Text
+  questions         Json?
+  transferNumber    String?       @map("transfer_number")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  client             Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client            Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@map("routing_configs")
 }
 
 model Lead {
-  id           String      @id @default(uuid())
-  clientId     String
-  firstName    String?
-  lastName     String?
-  phone        String
-  email        String?
-  source       String?
-  payloadJson  Json
-  dedupeKey    String
-  callStatus   CallStatus  @default(NEW)
-  skipReason   String?
-  createdAt    DateTime    @default(now())
+  id          String      @id @default(uuid())
+  clientId    String      @map("client_id")
+  firstName   String?     @map("first_name")
+  lastName    String?     @map("last_name")
+  phone       String
+  email       String?
+  source      String?
+  payloadJson Json        @map("payload_json")
+  dedupeKey   String      @map("dedupe_key")
+  callStatus  CallStatus  @default(NEW) @map("call_status")
+  skipReason  String?     @map("skip_reason")
+  createdAt   DateTime    @default(now()) @map("created_at")
 
-  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  calls        Call[]
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  calls       Call[]
 
   @@unique([clientId, dedupeKey])
   @@map("leads")
 }
 
 model Call {
-  id                    String      @id @default(uuid())
-  clientId              String
-  leadId                String
-  provider              CallProvider @default(BLAND)
-  providerCallId        String?     @unique
-  status                CallStatusEnum @default(CREATED)
-  outcome               String?
-  transcript            String?     @db.Text
-  recordingUrl          String?
-  rawProviderPayload    Json?
-  startedAt             DateTime?
-  endedAt               DateTime?
-  createdAt             DateTime    @default(now())
+  id                 String        @id @default(uuid())
+  clientId           String        @map("client_id")
+  leadId             String        @map("lead_id")
+  provider           CallProvider  @default(BLAND)
+  providerCallId     String?       @unique @map("provider_call_id")
+  status             CallStatusEnum @default(CREATED)
+  outcome            String?
+  transcript         String?       @db.Text
+  recordingUrl       String?       @map("recording_url")
+  rawProviderPayload Json?         @map("raw_provider_payload")
+  startedAt          DateTime?     @map("started_at")
+  endedAt            DateTime?     @map("ended_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
 
-  client                Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  lead                  Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lead               Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("calls")
 }
 
 model AuditLog {
-  id          String    @id @default(uuid())
-  clientId    String?
-  eventType   String
-  message     String    @db.Text
-  dataJson    Json?
-  createdAt   DateTime  @default(now())
+  id        String    @id @default(uuid())
+  clientId  String?   @map("client_id")
+  eventType String    @map("event_type")
+  message   String    @db.Text
+  dataJson  Json?     @map("data_json")
+  createdAt DateTime  @default(now()) @map("created_at")
 
-  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@map("audit_logs")
 }
