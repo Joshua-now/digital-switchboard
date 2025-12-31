@@ -156,6 +156,24 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           skipReason: 'No active routing config',
         },
       });
+console.log('[GHL] attempting call now (immediate)', { leadId: lead.id, phone });
+
+const callResult = await createCall(
+  lead.id,
+  clientId,
+  phone,
+  routingConfig.instructions,
+  routingConfig.transferNumber || undefined
+);
+
+console.log('[GHL] createCall result', callResult);
+
+res.status(200).json({
+  message: 'Lead received and call attempted immediately',
+  leadId: lead.id,
+  callResult,
+});
+return;
 
       console.log('[GHL] skipped - no routing config', { leadId: lead.id });
       res.status(200).json({ message: 'Lead received but no routing config', leadId: lead.id });
