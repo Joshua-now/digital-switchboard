@@ -30,7 +30,7 @@ router.post('/auth/login', async (req: AuthRequest, res: Response) => {
   res.json({ success: true });
 });
 
-router.post('/auth/logout', requireAuth, (req: AuthRequest, res: Response) => {
+router.post('/auth/logout', requireAuth, (_req: AuthRequest, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true });
 });
@@ -56,12 +56,25 @@ router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => 
       return;
     }
 
-    // Required now that your Prisma schema has ghlLocationId as NOT NULL + UNIQUE
     const cleanedGhlLocationId =
       typeof ghlLocationId === 'string' ? ghlLocationId.trim() : '';
 
     if (!cleanedGhlLocationId) {
       res.status(400).json({ error: 'ghlLocationId is required' });
+      return;
+    }
+
+    // Friendly error before Prisma throws a unique constraint exception
+    const existing = await prisma.client.findUnique({
+      where: { ghlLocationId: cleanedGhlLocationId },
+      select: { id: true, name: true },
+    });
+
+    if (existing) {
+      res.status(409).json({
+        error: 'Client already exists for this ghlLocationId',
+        existingClient: existing,
+      });
       return;
     }
 
