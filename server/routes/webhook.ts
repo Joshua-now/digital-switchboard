@@ -7,8 +7,7 @@ import { createCall } from '../providers/bland.js';
 const router = express.Router();
 
 /**
- * Extract phone from the many common GoHighLevel webhook shapes.
- * Add more paths here if your GHL payload differs.
+ * Extract phone from common GoHighLevel webhook shapes.
  */
 function extractRawPhone(payload: any): string | undefined {
   return (
@@ -24,7 +23,12 @@ function extractRawPhone(payload: any): string | undefined {
 }
 
 function extractContactId(payload: any): string | undefined {
-  return payload?.contactId || payload?.contact?.id || payload?.data?.contactId || payload?.data?.contact?.id;
+  return (
+    payload?.contactId ||
+    payload?.contact?.id ||
+    payload?.data?.contactId ||
+    payload?.data?.contact?.id
+  );
 }
 
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
@@ -60,7 +64,6 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
 
     const routingConfig = client.routingConfigs[0];
 
-    // More logging for visibility
     console.log('[GHL] client status', { status: client.status });
     console.log('[GHL] routing config', { found: !!routingConfig });
 
@@ -118,10 +121,25 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     const lead = await prisma.lead.create({
       data: {
         clientId,
-        firstName: payload?.firstName || payload?.contact?.firstName || payload?.data?.firstName || payload?.data?.contact?.firstName || null,
-        lastName: payload?.lastName || payload?.contact?.lastName || payload?.data?.lastName || payload?.data?.contact?.lastName || null,
+        firstName:
+          payload?.firstName ||
+          payload?.contact?.firstName ||
+          payload?.data?.firstName ||
+          payload?.data?.contact?.firstName ||
+          null,
+        lastName:
+          payload?.lastName ||
+          payload?.contact?.lastName ||
+          payload?.data?.lastName ||
+          payload?.data?.contact?.lastName ||
+          null,
         phone,
-        email: payload?.email || payload?.contact?.email || payload?.data?.email || payload?.data?.contact?.email || null,
+        email:
+          payload?.email ||
+          payload?.contact?.email ||
+          payload?.data?.email ||
+          payload?.data?.contact?.email ||
+          null,
         source: payload?.source || 'gohighlevel',
         payloadJson: payload,
         dedupeKey,
@@ -134,6 +152,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       phone,
     });
 
+    // Client inactive => skip
     if (client.status !== 'ACTIVE') {
       await prisma.lead.update({
         where: { id: lead.id },
@@ -148,6 +167,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return;
     }
 
+    // No routing config => skip
     if (!routingConfig) {
       await prisma.lead.update({
         where: { id: lead.id },
@@ -156,31 +176,19 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           skipReason: 'No active routing config',
         },
       });
-console.log('[GHL] attempting call now (immediate)', { leadId: lead.id, phone });
-
-const callResult = await createCall(
-  lead.id,
-  clientId,
-  phone,
-  routingConfig.instructions,
-  routingConfig.transferNumber || undefined
-);
-
-console.log('[GHL] createCall result', callResult);
-
-res.status(200).json({
-  message: 'Lead received and call attempted immediately',
-  leadId: lead.id,
-  callResult,
-});
-return;
 
       console.log('[GHL] skipped - no routing config', { leadId: lead.id });
       res.status(200).json({ message: 'Lead received but no routing config', leadId: lead.id });
       return;
     }
 
-    const inQuietHours = isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd);
+    // Quiet hours => skip
+    const inQuietHours = isWithinQuietHours(
+      client.timezone,
+      client.quietHoursStart,
+      client.quietHoursEnd
+    );
+
     console.log('[GHL] quiet hours check', {
       inQuietHours,
       timezone: client.timezone,
@@ -216,7 +224,7 @@ return;
     const delaySeconds = Math.max(0, Number(routingConfig.callWithinSeconds ?? 0));
     console.log('[GHL] queued lead, scheduling call', { leadId: lead.id, delaySeconds });
 
-    // Respond immediately (so GHL doesn’t retry), then run call async
+    // Respond immediately (so GHL doesn’t retry)
     res.status(200).json({
       message: 'Lead received and call scheduled',
       leadId: lead.id,
@@ -249,7 +257,6 @@ return;
             error: callResult.error,
           });
 
-          // Mark the lead as failed (optional but helpful)
           await prisma.lead.update({
             where: { id: lead.id },
             data: {
@@ -260,11 +267,12 @@ return;
         }
       } catch (err: any) {
         console.error('[GHL] background call error', err);
+
         await createAuditLog('WEBHOOK_ERROR', err?.message || 'Background call error', clientId, {
           leadId: lead.id,
           error: err?.message,
         });
-        // Mark lead failed to make it obvious in UI
+
         await prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -275,7 +283,6 @@ return;
       }
     }, delaySeconds * 1000);
 
-    // IMPORTANT: return here so we don’t continue execution after res.json
     return;
   } catch (error: any) {
     console.error('Webhook error:', error);
