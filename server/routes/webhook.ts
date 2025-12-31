@@ -6,9 +6,34 @@ import { createCall } from '../providers/bland.js';
 
 const router = express.Router();
 
+/**
+ * Extract phone from the many common GoHighLevel webhook shapes.
+ * Add more paths here if your GHL payload differs.
+ */
+function extractRawPhone(payload: any): string | undefined {
+  return (
+    payload?.phone ||
+    payload?.phoneNumber ||
+    payload?.contact?.phone ||
+    payload?.contact?.phoneNumber ||
+    payload?.contact?.phoneNumberRaw ||
+    payload?.data?.phone ||
+    payload?.data?.phoneNumber ||
+    payload?.data?.contact?.phone
+  );
+}
+
+function extractContactId(payload: any): string | undefined {
+  return payload?.contactId || payload?.contact?.id || payload?.data?.contactId || payload?.data?.contact?.id;
+}
+
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const payload = req.body;
+
+  // 🔎 Safe logs (no secrets)
+  console.log('[GHL] webhook received', { clientId });
+  console.log('[GHL] payload keys', Object.keys(payload || {}));
 
   try {
     const client = await prisma.client.findUnique({
@@ -22,42 +47,55 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     });
 
     if (!client) {
-      await createAuditLog(
-        'WEBHOOK_ERROR',
-        `Client not found: ${clientId}`,
-        undefined,
-        { clientId, payload }
-      );
+      await createAuditLog('WEBHOOK_ERROR', `Client not found: ${clientId}`, undefined, {
+        clientId,
+        payloadSummary: {
+          keys: Object.keys(payload || {}),
+          contactId: extractContactId(payload),
+        },
+      });
       res.status(404).json({ error: 'Client not found' });
       return;
     }
 
-    const rawPhone = payload.phone || payload.contact?.phone || payload.phoneNumber;
+    const routingConfig = client.routingConfigs[0];
+
+    // More logging for visibility
+    console.log('[GHL] client status', { status: client.status });
+    console.log('[GHL] routing config', { found: !!routingConfig });
+
+    const rawPhone = extractRawPhone(payload);
+    console.log('[GHL] raw phone candidate', { rawPhone });
+
     if (!rawPhone) {
-      await createAuditLog(
-        'WEBHOOK_ERROR',
-        'No phone number in payload',
-        clientId,
-        { payload }
-      );
+      await createAuditLog('WEBHOOK_ERROR', 'No phone number in payload', clientId, {
+        payloadSummary: {
+          keys: Object.keys(payload || {}),
+          contactId: extractContactId(payload),
+        },
+      });
       res.status(400).json({ error: 'Phone number required' });
       return;
     }
 
     const phone = normalizePhone(rawPhone);
+    console.log('[GHL] normalized phone', { phone });
+
     if (!phone) {
-      await createAuditLog(
-        'WEBHOOK_ERROR',
-        `Invalid phone number: ${rawPhone}`,
-        clientId,
-        { payload }
-      );
+      await createAuditLog('WEBHOOK_ERROR', `Invalid phone number: ${rawPhone}`, clientId, {
+        rawPhone,
+        payloadSummary: {
+          keys: Object.keys(payload || {}),
+          contactId: extractContactId(payload),
+        },
+      });
       res.status(400).json({ error: 'Invalid phone number' });
       return;
     }
 
-    const contactId = payload.contactId || payload.contact?.id;
+    const contactId = extractContactId(payload);
     const dedupeKey = generateDedupeKey(contactId, phone);
+    console.log('[GHL] dedupe key', { dedupeKey, contactId });
 
     const existingLead = await prisma.lead.findUnique({
       where: {
@@ -69,12 +107,10 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     });
 
     if (existingLead) {
-      await createAuditLog(
-        'WEBHOOK_DUPLICATE',
-        `Duplicate lead ignored: ${dedupeKey}`,
-        clientId,
-        { leadId: existingLead.id, dedupeKey }
-      );
+      await createAuditLog('WEBHOOK_DUPLICATE', `Duplicate lead ignored: ${dedupeKey}`, clientId, {
+        leadId: existingLead.id,
+        dedupeKey,
+      });
       res.status(200).json({ message: 'Lead already processed', leadId: existingLead.id });
       return;
     }
@@ -82,11 +118,11 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     const lead = await prisma.lead.create({
       data: {
         clientId,
-        firstName: payload.firstName || payload.contact?.firstName || null,
-        lastName: payload.lastName || payload.contact?.lastName || null,
+        firstName: payload?.firstName || payload?.contact?.firstName || payload?.data?.firstName || payload?.data?.contact?.firstName || null,
+        lastName: payload?.lastName || payload?.contact?.lastName || payload?.data?.lastName || payload?.data?.contact?.lastName || null,
         phone,
-        email: payload.email || payload.contact?.email || null,
-        source: payload.source || 'gohighlevel',
+        email: payload?.email || payload?.contact?.email || payload?.data?.email || payload?.data?.contact?.email || null,
+        source: payload?.source || 'gohighlevel',
         payloadJson: payload,
         dedupeKey,
         callStatus: 'NEW',
@@ -106,11 +142,12 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           skipReason: 'Client inactive',
         },
       });
+
+      console.log('[GHL] skipped - client inactive', { leadId: lead.id });
       res.status(200).json({ message: 'Lead received but client inactive', leadId: lead.id });
       return;
     }
 
-    const routingConfig = client.routingConfigs[0];
     if (!routingConfig) {
       await prisma.lead.update({
         where: { id: lead.id },
@@ -119,11 +156,21 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           skipReason: 'No active routing config',
         },
       });
+
+      console.log('[GHL] skipped - no routing config', { leadId: lead.id });
       res.status(200).json({ message: 'Lead received but no routing config', leadId: lead.id });
       return;
     }
 
-    if (isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)) {
+    const inQuietHours = isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd);
+    console.log('[GHL] quiet hours check', {
+      inQuietHours,
+      timezone: client.timezone,
+      start: client.quietHoursStart,
+      end: client.quietHoursEnd,
+    });
+
+    if (inQuietHours) {
       await prisma.lead.update({
         where: { id: lead.id },
         data: {
@@ -131,16 +178,16 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           skipReason: 'Quiet hours',
         },
       });
-      await createAuditLog(
-        'CALL_SKIPPED',
-        `Call skipped due to quiet hours: ${phone}`,
-        clientId,
-        { leadId: lead.id }
-      );
+
+      await createAuditLog('CALL_SKIPPED', `Call skipped due to quiet hours: ${phone}`, clientId, {
+        leadId: lead.id,
+      });
+
       res.status(200).json({ message: 'Lead received but in quiet hours', leadId: lead.id });
       return;
     }
 
+    // Queue it first
     await prisma.lead.update({
       where: { id: lead.id },
       data: {
@@ -148,30 +195,76 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       },
     });
 
-    const callResult = await createCall(
-      lead.id,
-      clientId,
-      phone,
-      routingConfig.instructions,
-      routingConfig.transferNumber || undefined
-    );
+    const delaySeconds = Math.max(0, Number(routingConfig.callWithinSeconds ?? 0));
+    console.log('[GHL] queued lead, scheduling call', { leadId: lead.id, delaySeconds });
 
-    if (callResult.success) {
-      res.status(200).json({
-        message: 'Lead received and call initiated',
-        leadId: lead.id,
-        callId: callResult.callId,
-      });
-    } else {
-      res.status(200).json({
-        message: 'Lead received but call failed',
-        leadId: lead.id,
-        error: callResult.error,
-      });
-    }
+    // Respond immediately (so GHL doesn’t retry), then run call async
+    res.status(200).json({
+      message: 'Lead received and call scheduled',
+      leadId: lead.id,
+      delaySeconds,
+    });
+
+    // Run call later (non-blocking)
+    setTimeout(async () => {
+      try {
+        console.log('[GHL] attempting call now', { leadId: lead.id, phone });
+
+        const callResult = await createCall(
+          lead.id,
+          clientId,
+          phone,
+          routingConfig.instructions,
+          routingConfig.transferNumber || undefined
+        );
+
+        if (callResult.success) {
+          console.log('[GHL] call initiated', { leadId: lead.id, callId: callResult.callId });
+          await createAuditLog('CALL_INITIATED', 'Call initiated successfully', clientId, {
+            leadId: lead.id,
+            callId: callResult.callId,
+          });
+        } else {
+          console.log('[GHL] call failed', { leadId: lead.id, error: callResult.error });
+          await createAuditLog('CALL_FAILED', 'Call failed to initiate', clientId, {
+            leadId: lead.id,
+            error: callResult.error,
+          });
+
+          // Mark the lead as failed (optional but helpful)
+          await prisma.lead.update({
+            where: { id: lead.id },
+            data: {
+              callStatus: 'FAILED',
+              skipReason: callResult.error || 'Call failed',
+            },
+          });
+        }
+      } catch (err: any) {
+        console.error('[GHL] background call error', err);
+        await createAuditLog('WEBHOOK_ERROR', err?.message || 'Background call error', clientId, {
+          leadId: lead.id,
+          error: err?.message,
+        });
+        // Mark lead failed to make it obvious in UI
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: {
+            callStatus: 'FAILED',
+            skipReason: err?.message || 'Background call error',
+          },
+        });
+      }
+    }, delaySeconds * 1000);
+
+    // IMPORTANT: return here so we don’t continue execution after res.json
+    return;
   } catch (error: any) {
     console.error('Webhook error:', error);
-    await createAuditLog('WEBHOOK_ERROR', error.message, clientId, { payload, error: error.message });
+    await createAuditLog('WEBHOOK_ERROR', error.message, clientId, {
+      payloadSummary: { keys: Object.keys(payload || {}) },
+      error: error.message,
+    });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -229,16 +322,11 @@ router.post('/bland', async (req: Request, res: Response) => {
       },
     });
 
-    await createAuditLog(
-      'CALL_UPDATED',
-      `Call status updated to ${callStatus}`,
-      call.clientId,
-      {
-        callId: call.id,
-        leadId: call.leadId,
-        status: callStatus,
-      }
-    );
+    await createAuditLog('CALL_UPDATED', `Call status updated to ${callStatus}`, call.clientId, {
+      callId: call.id,
+      leadId: call.leadId,
+      status: callStatus,
+    });
 
     res.status(200).json({ message: 'Webhook processed' });
   } catch (error: any) {
