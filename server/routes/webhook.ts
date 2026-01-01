@@ -126,7 +126,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid phone number' });
     }
 
-    // 3) Dedupe (your w30 key logic lives in utils.ts)
+    // 3) Dedupe
     const dedupeKey = generateDedupeKey(leadData.contactId, phone);
 
     const existingLead = await prisma.lead.findUnique({
@@ -161,13 +161,12 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       phone,
     });
 
-    // 5) Decide quiet-hours behavior
+    // 5) Quiet-hours behavior:
     // Speed-to-lead rule:
     // - Immediate calls (fresh submissions) bypass quiet hours
-    // - Delayed calls respect quiet hours (if you ever delay)
+    // - Non-immediate calls (old leads) respect quiet hours
     const IMMEDIATE_WINDOW_SECONDS = Number(process.env.IMMEDIATE_WINDOW_SECONDS ?? 300);
     const ageSeconds = secondsSince(leadData.timestamp);
-
     const isImmediate =
       ageSeconds === null ? true : ageSeconds >= 0 && ageSeconds <= IMMEDIATE_WINDOW_SECONDS;
 
@@ -181,7 +180,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
         data: { callStatus: 'SKIPPED', skipReason: 'Quiet hours' },
       });
 
-      await createAuditLog('CALL_SKIPPED', 'Quiet hours (delayed call)', clientId, {
+      await createAuditLog('CALL_SKIPPED', 'Quiet hours (non-immediate lead)', clientId, {
         leadId: lead.id,
         ageSeconds,
       });
@@ -189,62 +188,50 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(200).json({ message: 'Skipped (quiet hours)', leadId: lead.id });
     }
 
-    // 6) Call (immediately or after configured delay)
+    // 6) CALL IMMEDIATELY (no setTimeout — Railway will kill timers)
     await prisma.lead.update({
       where: { id: lead.id },
       data: { callStatus: 'QUEUED' },
     });
 
-    const delaySeconds = Math.max(0, Number(routingConfig.callWithinSeconds ?? 0));
+    const callResult = await createCall(
+      lead.id,
+      clientId,
+      phone,
+      routingConfig.instructions,
+      routingConfig.transferNumber || undefined
+    );
 
-    // Respond immediately so GHL doesn't retry
-    res.status(200).json({
-      message: 'Lead received',
-      leadId: lead.id,
-      immediate: isImmediate,
-      delaySeconds,
+    if (callResult.success) {
+      await createAuditLog('CALL_INITIATED', 'Call initiated', clientId, {
+        leadId: lead.id,
+        providerCallId: callResult.callId,
+      });
+
+      return res.status(200).json({
+        message: 'Lead received and call initiated',
+        leadId: lead.id,
+        immediate: isImmediate,
+        callId: callResult.callId,
+      });
+    }
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { callStatus: 'FAILED', skipReason: callResult.error || 'Call failed' },
     });
 
-    // If you want true instant speed-to-lead, set callWithinSeconds = 0
-    setTimeout(async () => {
-      try {
-        const callResult = await createCall(
-          lead.id,
-          clientId,
-          phone,
-          routingConfig.instructions,
-          routingConfig.transferNumber || undefined
-        );
+    await createAuditLog('CALL_FAILED', 'Call failed to initiate', clientId, {
+      leadId: lead.id,
+      error: callResult.error,
+    });
 
-        if (callResult.success) {
-          await createAuditLog('CALL_INITIATED', 'Call initiated', clientId, {
-            leadId: lead.id,
-            providerCallId: callResult.callId,
-          });
-        } else {
-          await prisma.lead.update({
-            where: { id: lead.id },
-            data: { callStatus: 'FAILED', skipReason: callResult.error || 'Call failed' },
-          });
-
-          await createAuditLog('CALL_FAILED', 'Call failed to initiate', clientId, {
-            leadId: lead.id,
-            error: callResult.error,
-          });
-        }
-      } catch (err: any) {
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: { callStatus: 'FAILED', skipReason: err?.message || 'Background call error' },
-        });
-
-        await createAuditLog('CALL_ERROR', err?.message || 'Background call error', clientId, {
-          leadId: lead.id,
-        });
-      }
-    }, delaySeconds * 1000);
-
-    return;
+    return res.status(200).json({
+      message: 'Lead received but call failed',
+      leadId: lead.id,
+      immediate: isImmediate,
+      error: callResult.error,
+    });
   } catch (error: any) {
     console.error('Webhook error:', error);
     await createAuditLog('WEBHOOK_ERROR', error.message, clientId, {
