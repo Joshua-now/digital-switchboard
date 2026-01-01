@@ -31,6 +31,29 @@ function extractContactId(payload: any): string | undefined {
   );
 }
 
+/**
+ * Calculate how many seconds ago the lead was submitted, based on payload timestamp.
+ * Supports: ISO string, ms epoch, seconds epoch.
+ */
+function secondsSinceLeadSubmitted(payload: any): number | null {
+  const ts = payload?.timestamp ?? payload?.data?.timestamp;
+  if (!ts) return null;
+
+  let submittedAt: Date;
+
+  if (typeof ts === 'number') {
+    // If it's > 1e12 it's almost certainly milliseconds; otherwise seconds.
+    submittedAt = new Date(ts > 1e12 ? ts : ts * 1000);
+  } else {
+    submittedAt = new Date(String(ts));
+  }
+
+  if (Number.isNaN(submittedAt.getTime())) return null;
+
+  const ageSeconds = Math.floor((Date.now() - submittedAt.getTime()) / 1000);
+  return ageSeconds;
+}
+
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const payload = req.body;
@@ -182,15 +205,25 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return;
     }
 
-    // Quiet hours => skip
-    const inQuietHours = isWithinQuietHours(
-      client.timezone,
-      client.quietHoursStart,
-      client.quietHoursEnd
-    );
+    // Speed-to-lead quiet-hours bypass:
+    // If the lead is "fresh" (submitted within the immediate window), bypass quiet hours.
+    const IMMEDIATE_WINDOW_SECONDS = Number(process.env.IMMEDIATE_WINDOW_SECONDS ?? 300); // 5 minutes default
+    const ageSeconds = secondsSinceLeadSubmitted(payload);
 
-    console.log('[GHL] quiet hours check', {
+    const bypassQuietHours =
+      ageSeconds !== null &&
+      ageSeconds >= 0 &&
+      ageSeconds <= IMMEDIATE_WINDOW_SECONDS;
+
+    const inQuietHours =
+      !bypassQuietHours &&
+      isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd);
+
+    console.log('[GHL] quiet hours decision', {
       inQuietHours,
+      bypassQuietHours,
+      ageSeconds,
+      immediateWindowSeconds: IMMEDIATE_WINDOW_SECONDS,
       timezone: client.timezone,
       start: client.quietHoursStart,
       end: client.quietHoursEnd,
@@ -207,6 +240,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
 
       await createAuditLog('CALL_SKIPPED', `Call skipped due to quiet hours: ${phone}`, clientId, {
         leadId: lead.id,
+        ageSeconds,
       });
 
       res.status(200).json({ message: 'Lead received but in quiet hours', leadId: lead.id });
@@ -229,6 +263,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       message: 'Lead received and call scheduled',
       leadId: lead.id,
       delaySeconds,
+      bypassQuietHours,
+      ageSeconds,
     });
 
     // Run call later (non-blocking)
