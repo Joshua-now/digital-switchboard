@@ -7,15 +7,15 @@ import { createCall } from '../providers/bland.js';
 const router = express.Router();
 
 /**
- * Extract fields from common GoHighLevel webhook shapes.
- * Keep this centralized so the handler stays clean.
+ * Parse lead fields from common GoHighLevel webhook shapes.
  */
 function parseGhlLead(payload: any) {
   const contactId =
     payload?.contactId ||
     payload?.contact?.id ||
     payload?.data?.contactId ||
-    payload?.data?.contact?.id;
+    payload?.data?.contact?.id ||
+    null;
 
   const rawPhone =
     payload?.phone ||
@@ -25,7 +25,8 @@ function parseGhlLead(payload: any) {
     payload?.contact?.phoneNumberRaw ||
     payload?.data?.phone ||
     payload?.data?.phoneNumber ||
-    payload?.data?.contact?.phone;
+    payload?.data?.contact?.phone ||
+    null;
 
   const firstName =
     payload?.firstName ||
@@ -49,27 +50,24 @@ function parseGhlLead(payload: any) {
     null;
 
   const source = payload?.source || 'gohighlevel';
-
-  // GHL sometimes includes a timestamp but it may be missing/unreliable.
   const timestamp = payload?.timestamp ?? payload?.data?.timestamp ?? null;
 
   return { contactId, rawPhone, firstName, lastName, email, source, timestamp };
 }
 
 /**
- * Best-effort age-in-seconds from payload timestamp.
+ * Best-effort age in seconds from timestamp (ISO string or epoch).
  * Returns null if missing/unparseable.
  */
-function secondsSince(payloadTimestamp: any): number | null {
-  if (!payloadTimestamp) return null;
+function ageSeconds(timestamp: any): number | null {
+  if (!timestamp) return null;
 
   const d =
-    typeof payloadTimestamp === 'number'
-      ? new Date(payloadTimestamp > 1e12 ? payloadTimestamp : payloadTimestamp * 1000)
-      : new Date(String(payloadTimestamp));
+    typeof timestamp === 'number'
+      ? new Date(timestamp > 1e12 ? timestamp : timestamp * 1000)
+      : new Date(String(timestamp));
 
   if (Number.isNaN(d.getTime())) return null;
-
   return Math.floor((Date.now() - d.getTime()) / 1000);
 }
 
@@ -78,14 +76,11 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const payload = req.body;
 
   try {
-    // 1) Load client + routing config
+    // Load client + active routing config
     const client = await prisma.client.findUnique({
       where: { id: clientId },
       include: {
-        routingConfigs: {
-          where: { active: true },
-          take: 1,
-        },
+        routingConfigs: { where: { active: true }, take: 1 },
       },
     });
 
@@ -108,7 +103,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(200).json({ message: 'No routing config - skipped' });
     }
 
-    // 2) Parse lead data
+    // Parse lead
     const leadData = parseGhlLead(payload);
 
     if (!leadData.rawPhone) {
@@ -126,9 +121,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid phone number' });
     }
 
-    // 3) Dedupe
-    const dedupeKey = generateDedupeKey(leadData.contactId, phone);
-
+    // Dedupe
+    const dedupeKey = generateDedupeKey(leadData.contactId ?? undefined, phone);
     const existingLead = await prisma.lead.findUnique({
       where: { clientId_dedupeKey: { clientId, dedupeKey } },
     });
@@ -141,7 +135,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(200).json({ message: 'Duplicate ignored', leadId: existingLead.id });
     }
 
-    // 4) Create lead
+    // Create lead
     const lead = await prisma.lead.create({
       data: {
         clientId,
@@ -156,25 +150,16 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       },
     });
 
-    await createAuditLog('LEAD_CREATED', 'Lead created', clientId, {
-      leadId: lead.id,
-      phone,
-    });
+    await createAuditLog('LEAD_CREATED', 'Lead created', clientId, { leadId: lead.id, phone });
 
-    // 5) Quiet-hours behavior:
-    // Speed-to-lead rule:
-    // - Immediate calls (fresh submissions) bypass quiet hours
-    // - Non-immediate calls (old leads) respect quiet hours
-    const IMMEDIATE_WINDOW_SECONDS = Number(process.env.IMMEDIATE_WINDOW_SECONDS ?? 300);
-    const ageSeconds = secondsSince(leadData.timestamp);
-    const isImmediate =
-      ageSeconds === null ? true : ageSeconds >= 0 && ageSeconds <= IMMEDIATE_WINDOW_SECONDS;
+    // Quiet hours policy:
+    // - If it's an immediate webhook (fresh / no timestamp), bypass quiet hours
+    // - If it's older, respect quiet hours
+    const immediateWindow = Number(process.env.IMMEDIATE_WINDOW_SECONDS ?? 300);
+    const a = ageSeconds(leadData.timestamp);
+    const isImmediate = a === null ? true : a >= 0 && a <= immediateWindow;
 
-    const blockedByQuietHours =
-      !isImmediate &&
-      isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd);
-
-    if (blockedByQuietHours) {
+    if (!isImmediate && isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)) {
       await prisma.lead.update({
         where: { id: lead.id },
         data: { callStatus: 'SKIPPED', skipReason: 'Quiet hours' },
@@ -182,13 +167,13 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
 
       await createAuditLog('CALL_SKIPPED', 'Quiet hours (non-immediate lead)', clientId, {
         leadId: lead.id,
-        ageSeconds,
+        ageSeconds: a,
       });
 
       return res.status(200).json({ message: 'Skipped (quiet hours)', leadId: lead.id });
     }
 
-    // 6) CALL IMMEDIATELY (no setTimeout — Railway will kill timers)
+    // Call immediately (no timers)
     await prisma.lead.update({
       where: { id: lead.id },
       data: { callStatus: 'QUEUED' },
@@ -202,7 +187,20 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       routingConfig.transferNumber || undefined
     );
 
+    // Safe log (no secrets)
+    console.log('[CALL] createCall result', {
+      leadId: lead.id,
+      success: callResult.success,
+      callId: callResult.callId,
+      error: callResult.error,
+    });
+
     if (callResult.success) {
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { callStatus: 'CALLING' },
+      });
+
       await createAuditLog('CALL_INITIATED', 'Call initiated', clientId, {
         leadId: lead.id,
         providerCallId: callResult.callId,
@@ -242,43 +240,56 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * ✅ Route existence / ping (helps prove mounting is correct in Railway)
+ * Visit: GET https://<BASE_URL>/webhook/bland
+ */
+router.get('/bland', (req: Request, res: Response) => {
+  return res.status(200).json({ ok: true, route: '/webhook/bland' });
+});
+
+// Optional: some services do a HEAD probe
+router.head('/bland', (req: Request, res: Response) => {
+  return res.status(200).end();
+});
+
+/**
+ * Bland status webhook (called by Bland after call events)
+ * Accept both call_id and callId just in case.
+ */
 router.post('/bland', async (req: Request, res: Response) => {
   const payload = req.body;
 
   try {
-    const callId = payload.call_id;
-    if (!callId) {
-      return res.status(400).json({ error: 'call_id required' });
-    }
+    const callId = payload?.call_id || payload?.callId;
+    if (!callId) return res.status(400).json({ error: 'call_id required' });
 
     const call = await prisma.call.findUnique({
       where: { providerCallId: callId },
       include: { lead: true },
     });
 
-    if (!call) {
-      return res.status(404).json({ error: 'Call not found' });
-    }
+    if (!call) return res.status(404).json({ error: 'Call not found' });
 
-    const status = payload.status?.toLowerCase();
-    let callStatus: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' = 'IN_PROGRESS';
-    let leadStatus: 'NEW' | 'QUEUED' | 'CALLING' | 'COMPLETED' | 'FAILED' | 'SKIPPED' = 'CALLING';
+    const status = String(payload?.status || '').toLowerCase();
 
-    if (status === 'completed' || payload.completed) {
-      callStatus = 'COMPLETED';
-      leadStatus = 'COMPLETED';
-    } else if (status === 'failed' || payload.error) {
-      callStatus = 'FAILED';
-      leadStatus = 'FAILED';
-    }
+    const callStatus: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' =
+      status === 'completed' || payload?.completed
+        ? 'COMPLETED'
+        : status === 'failed' || payload?.error
+          ? 'FAILED'
+          : 'IN_PROGRESS';
+
+    const leadStatus: 'NEW' | 'QUEUED' | 'CALLING' | 'COMPLETED' | 'FAILED' | 'SKIPPED' =
+      callStatus === 'COMPLETED' ? 'COMPLETED' : callStatus === 'FAILED' ? 'FAILED' : 'CALLING';
 
     await prisma.call.update({
       where: { id: call.id },
       data: {
         status: callStatus,
-        outcome: payload.outcome || payload.call_length || null,
-        transcript: payload.transcript || payload.transcripts?.[0]?.text || null,
-        recordingUrl: payload.recording_url || null,
+        outcome: payload?.outcome || payload?.call_length || null,
+        transcript: payload?.transcript || payload?.transcripts?.[0]?.text || null,
+        recordingUrl: payload?.recording_url || null,
         rawProviderPayload: payload,
         endedAt: callStatus === 'COMPLETED' || callStatus === 'FAILED' ? new Date() : null,
       },
