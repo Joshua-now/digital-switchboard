@@ -210,24 +210,28 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     const IMMEDIATE_WINDOW_SECONDS = Number(process.env.IMMEDIATE_WINDOW_SECONDS ?? 300); // 5 minutes default
     const ageSeconds = secondsSinceLeadSubmitted(payload);
 
-    const bypassQuietHours =
-      ageSeconds !== null &&
-      ageSeconds >= 0 &&
-      ageSeconds <= IMMEDIATE_WINDOW_SECONDS;
+// If we can't read timestamp, assume it's fresh (webhook just arrived)
+const bypassQuietHours =
+  ageSeconds === null
+    ? true
+    : ageSeconds >= 0 && ageSeconds <= IMMEDIATE_WINDOW_SECONDS;
+
 
     const inQuietHours =
       !bypassQuietHours &&
       isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd);
 
     console.log('[GHL] quiet hours decision', {
-      inQuietHours,
-      bypassQuietHours,
-      ageSeconds,
-      immediateWindowSeconds: IMMEDIATE_WINDOW_SECONDS,
-      timezone: client.timezone,
-      start: client.quietHoursStart,
-      end: client.quietHoursEnd,
-    });
+  inQuietHours,
+  bypassQuietHours,
+  ageSeconds,
+  timestampPresent: payload?.timestamp ?? payload?.data?.timestamp ? true : false,
+  immediateWindowSeconds: IMMEDIATE_WINDOW_SECONDS,
+  timezone: client.timezone,
+  start: client.quietHoursStart,
+  end: client.quietHoursEnd,
+});
+
 
     if (inQuietHours) {
       await prisma.lead.update({
