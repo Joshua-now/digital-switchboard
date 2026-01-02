@@ -1,10 +1,56 @@
 import express, { Request, Response } from 'express';
+import crypto from 'crypto';
 import { prisma } from '../lib/db.js';
 import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/utils.js';
 import { createAuditLog } from '../lib/audit.js';
 import { createCall } from '../providers/bland.js';
 
 const router = express.Router();
+
+const MAX_BODY_CHARS = Number(process.env.WEBHOOK_MAX_BODY_CHARS || 8000);
+
+/**
+ * Make a small, safe snapshot of an inbound payload so we don't store megabytes of data.
+ */
+function safePayloadSnapshot(payload: any) {
+  if (!payload) return null;
+
+  try {
+    const s = JSON.stringify(payload);
+    if (s.length <= MAX_BODY_CHARS) return payload;
+
+    return {
+      note: 'payload truncated',
+      approxSize: s.length,
+      keys: Object.keys(payload || {}),
+      preview: s.slice(0, 1000) + '…[TRUNCATED]',
+    };
+  } catch {
+    return { note: 'payload omitted (non-serializable)', keys: Object.keys(payload || {}) };
+  }
+}
+
+/**
+ * Constant-time string compare.
+ */
+function safeEqual(a: string, b: string) {
+  const aBuf = Buffer.from(a || '', 'utf8');
+  const bBuf = Buffer.from(b || '', 'utf8');
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+/**
+ * Optional simple shared-secret check (header equality).
+ * Use this if the provider supports "static secret header" style.
+ */
+function verifyStaticSecret(req: Request, envVarName: string, headerName: string) {
+  const expected = process.env[envVarName];
+  if (!expected) return true; // allow if not configured (dev mode)
+
+  const provided = String(req.headers[headerName] || '');
+  return safeEqual(provided, expected);
+}
 
 /**
  * Parse lead fields from common GoHighLevel webhook shapes.
@@ -71,11 +117,35 @@ function ageSeconds(timestamp: any): number | null {
   return Math.floor((Date.now() - d.getTime()) / 1000);
 }
 
+/**
+ * ✅ Route existence / ping (helps prove mounting is correct in Railway)
+ * Visit: GET https://<BASE_URL>/webhook/bland
+ */
+router.get('/bland', (_req: Request, res: Response) => {
+  return res.status(200).json({ ok: true, route: '/webhook/bland' });
+});
+
+// Optional: some services do a HEAD probe
+router.head('/bland', (_req: Request, res: Response) => {
+  return res.status(200).end();
+});
+
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const payload = req.body;
 
   try {
+    // 🔐 Optional shared-secret auth (recommended in prod)
+    // Set GHL_WEBHOOK_SECRET and configure GHL to send header x-webhook-secret
+    if (!verifyStaticSecret(req, 'GHL_WEBHOOK_SECRET', 'x-webhook-secret')) {
+      await createAuditLog('WEBHOOK_FORBIDDEN', 'Invalid GHL webhook secret', clientId, {
+        clientId,
+        ip: req.ip,
+        payloadKeys: Object.keys(payload || {}),
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     // Load client + active routing config
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -135,7 +205,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return res.status(200).json({ message: 'Duplicate ignored', leadId: existingLead.id });
     }
 
-    // Create lead
+    // Create lead (✅ store safe snapshot, not the full payload)
     const lead = await prisma.lead.create({
       data: {
         clientId,
@@ -144,7 +214,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
         phone,
         email: leadData.email,
         source: leadData.source,
-        payloadJson: payload,
+        payloadJson: safePayloadSnapshot(payload),
         dedupeKey,
         callStatus: 'NEW',
       },
@@ -159,7 +229,10 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     const a = ageSeconds(leadData.timestamp);
     const isImmediate = a === null ? true : a >= 0 && a <= immediateWindow;
 
-    if (!isImmediate && isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)) {
+    if (
+      !isImmediate &&
+      isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)
+    ) {
       await prisma.lead.update({
         where: { id: lead.id },
         data: { callStatus: 'SKIPPED', skipReason: 'Quiet hours' },
@@ -241,19 +314,6 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
 });
 
 /**
- * ✅ Route existence / ping (helps prove mounting is correct in Railway)
- * Visit: GET https://<BASE_URL>/webhook/bland
- */
-router.get('/bland', (req: Request, res: Response) => {
-  return res.status(200).json({ ok: true, route: '/webhook/bland' });
-});
-
-// Optional: some services do a HEAD probe
-router.head('/bland', (req: Request, res: Response) => {
-  return res.status(200).end();
-});
-
-/**
  * Bland status webhook (called by Bland after call events)
  * Accept both call_id and callId just in case.
  */
@@ -261,15 +321,30 @@ router.post('/bland', async (req: Request, res: Response) => {
   const payload = req.body;
 
   try {
-    const callId = payload?.call_id || payload?.callId;
-    if (!callId) return res.status(400).json({ error: 'call_id required' });
+    // 🔐 Optional shared-secret auth (recommended in prod)
+    // Set BLAND_WEBHOOK_SECRET and configure Bland to send header x-webhook-secret
+    if (!verifyStaticSecret(req, 'BLAND_WEBHOOK_SECRET', 'x-webhook-secret')) {
+      await createAuditLog('WEBHOOK_FORBIDDEN', 'Invalid Bland webhook secret', undefined, {
+        ip: req.ip,
+        payloadKeys: Object.keys(payload || {}),
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const providerCallId = payload?.call_id || payload?.callId;
+    if (!providerCallId) return res.status(400).json({ error: 'call_id required' });
 
     const call = await prisma.call.findUnique({
-      where: { providerCallId: callId },
+      where: { providerCallId: providerCallId },
       include: { lead: true },
     });
 
     if (!call) return res.status(404).json({ error: 'Call not found' });
+
+    // ✅ Idempotency: if already terminal, ignore retries
+    if (call.status === 'COMPLETED' || call.status === 'FAILED') {
+      return res.status(200).json({ message: 'Already processed' });
+    }
 
     const status = String(payload?.status || '').toLowerCase();
 
@@ -277,11 +352,14 @@ router.post('/bland', async (req: Request, res: Response) => {
       status === 'completed' || payload?.completed
         ? 'COMPLETED'
         : status === 'failed' || payload?.error
-          ? 'FAILED'
-          : 'IN_PROGRESS';
+        ? 'FAILED'
+        : 'IN_PROGRESS';
 
     const leadStatus: 'NEW' | 'QUEUED' | 'CALLING' | 'COMPLETED' | 'FAILED' | 'SKIPPED' =
       callStatus === 'COMPLETED' ? 'COMPLETED' : callStatus === 'FAILED' ? 'FAILED' : 'CALLING';
+
+    // ✅ Store safe snapshot only (no giant prompt dumps)
+    const providerSnapshot = safePayloadSnapshot(payload);
 
     await prisma.call.update({
       where: { id: call.id },
@@ -290,7 +368,7 @@ router.post('/bland', async (req: Request, res: Response) => {
         outcome: payload?.outcome || payload?.call_length || null,
         transcript: payload?.transcript || payload?.transcripts?.[0]?.text || null,
         recordingUrl: payload?.recording_url || null,
-        rawProviderPayload: payload,
+        rawProviderPayload: providerSnapshot,
         endedAt: callStatus === 'COMPLETED' || callStatus === 'FAILED' ? new Date() : null,
       },
     });
@@ -309,7 +387,10 @@ router.post('/bland', async (req: Request, res: Response) => {
     return res.status(200).json({ message: 'Webhook processed' });
   } catch (error: any) {
     console.error('Bland webhook error:', error);
-    await createAuditLog('WEBHOOK_ERROR', error.message, undefined, { payload, error: error.message });
+    await createAuditLog('WEBHOOK_ERROR', error.message, undefined, {
+      payloadKeys: Object.keys(payload || {}),
+      error: error.message,
+    });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
