@@ -12,7 +12,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
 
   const navigation = [
-    { name: 'Clients', href: '/', icon: Users },
+    { name: 'Clients', href: '/clients', icon: Users },
     { name: 'Leads', href: '/leads', icon: Database },
     { name: 'Calls', href: '/calls', icon: Phone },
   ];
