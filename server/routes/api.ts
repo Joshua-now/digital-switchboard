@@ -40,6 +40,44 @@ router.get('/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
 });
 
 // CLIENTS
+router.get('/clients', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const clients = await prisma.client.findMany({
+      include: {
+        _count: {
+          select: { leads: true, calls: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(clients);
+  } catch (error: any) {
+    console.error('Error fetching clients:', error);
+    res.status(500).json({ error: 'Failed to fetch clients' });
+  }
+});
+
+router.get('/clients/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const client = await prisma.client.findUnique({
+      where: { id },
+    });
+
+    if (!client) {
+      res.status(404).json({ error: 'Client not found' });
+      return;
+    }
+
+    res.json(client);
+  } catch (error: any) {
+    console.error('Error fetching client:', error);
+    res.status(500).json({ error: 'Failed to fetch client' });
+  }
+});
+
 router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const {
@@ -100,6 +138,144 @@ router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => 
       code: error?.code,
       meta: error?.meta,
     });
+  }
+});
+
+router.patch('/clients/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, timezone, quietHoursStart, quietHoursEnd, status } = req.body;
+
+    const client = await prisma.client.update({
+      where: { id },
+      data: {
+        ...(name && { name }),
+        ...(timezone && { timezone }),
+        ...(quietHoursStart && { quietHoursStart }),
+        ...(quietHoursEnd && { quietHoursEnd }),
+        ...(status && { status }),
+      },
+    });
+
+    await createAuditLog('CLIENT_UPDATED', `Client updated: ${client.name}`, client.id);
+
+    res.json(client);
+  } catch (error: any) {
+    console.error('Error updating client:', error);
+    res.status(500).json({ error: 'Failed to update client' });
+  }
+});
+
+router.get('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const config = await prisma.routingConfig.findUnique({
+      where: { clientId: id },
+    });
+
+    res.json(config);
+  } catch (error: any) {
+    console.error('Error fetching routing config:', error);
+    res.status(500).json({ error: 'Failed to fetch routing config' });
+  }
+});
+
+router.post('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { active, callWithinSeconds, instructions, transferNumber } = req.body;
+
+    const config = await prisma.routingConfig.upsert({
+      where: { clientId: id },
+      create: {
+        clientId: id,
+        active: active ?? true,
+        callWithinSeconds: callWithinSeconds ?? 60,
+        instructions: instructions || '',
+        transferNumber: transferNumber || null,
+      },
+      update: {
+        active,
+        callWithinSeconds,
+        instructions,
+        transferNumber: transferNumber || null,
+      },
+    });
+
+    await createAuditLog('ROUTING_CONFIG_UPDATED', `Routing config updated for client ${id}`, id);
+
+    res.json(config);
+  } catch (error: any) {
+    console.error('Error saving routing config:', error);
+    res.status(500).json({ error: 'Failed to save routing config' });
+  }
+});
+
+// LEADS
+router.get('/leads', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { clientId, limit = '50' } = req.query;
+
+    const where: any = {};
+    if (clientId && typeof clientId === 'string') {
+      where.clientId = clientId;
+    }
+
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          client: { select: { id: true, name: true } },
+          calls: { select: { id: true, status: true, outcome: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: parseInt(limit as string, 10),
+      }),
+      prisma.lead.count({ where }),
+    ]);
+
+    res.json({ leads, total });
+  } catch (error: any) {
+    console.error('Error fetching leads:', error);
+    res.status(500).json({ error: 'Failed to fetch leads' });
+  }
+});
+
+// CALLS
+router.get('/calls', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { clientId, limit = '50' } = req.query;
+
+    const where: any = {};
+    if (clientId && typeof clientId === 'string') {
+      where.clientId = clientId;
+    }
+
+    const [calls, total] = await Promise.all([
+      prisma.call.findMany({
+        where,
+        include: {
+          client: { select: { id: true, name: true } },
+          lead: {
+            select: {
+              id: true,
+              phone: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: parseInt(limit as string, 10),
+      }),
+      prisma.call.count({ where }),
+    ]);
+
+    res.json({ calls, total });
+  } catch (error: any) {
+    console.error('Error fetching calls:', error);
+    res.status(500).json({ error: 'Failed to fetch calls' });
   }
 });
 

@@ -221,24 +221,92 @@ export const api = {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       return fetchNoBody(`/api/clients/${encodeURIComponent(id)}`, { method: "DELETE", headers });
     },
+    getRoutingConfig: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/clients/${encodeURIComponent(id)}/routing`, { headers });
+    },
+    saveRoutingConfig: (id: string, payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/clients/${encodeURIComponent(id)}/routing`, {
+        method: "POST",
+        body: payload,
+        headers,
+      });
+    },
   },
 
   /**
-   * Calls API (guessable; adjust paths if your backend uses different routes).
-   * If your backend endpoints are under /api/calls, keep these.
-   * If they are under something else, tell me the actual route names and I'll align them.
+   * Leads API
    */
-  calls: {
-    list: () => fetchApi<any[]>("/api/calls"),
-    get: (id: string) => fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`),
-    create: (payload: any) => fetchApi<any>("/api/calls", { method: "POST", body: payload }),
-    update: (id: string, payload: any) =>
-      fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`, {
+  leads: {
+    list: (params?: { clientId?: string; limit?: number }, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const query = new URLSearchParams();
+      if (params?.clientId) query.set('clientId', params.clientId);
+      if (params?.limit) query.set('limit', params.limit.toString());
+      const queryString = query.toString();
+      return fetchApi<{ leads: any[]; total: number }>(
+        `/api/leads${queryString ? '?' + queryString : ''}`,
+        { headers }
+      );
+    },
+    get: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/leads/${encodeURIComponent(id)}`, { headers });
+    },
+    create: (payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>("/api/leads", { method: "POST", body: payload, headers });
+    },
+    update: (id: string, payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/leads/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: payload,
-      }),
-    delete: (id: string) =>
-      fetchNoBody(`/api/calls/${encodeURIComponent(id)}`, { method: "DELETE" }),
+        headers,
+      });
+    },
+    delete: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchNoBody(`/api/leads/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    },
+  },
+
+  /**
+   * Calls API
+   */
+  calls: {
+    list: (params?: { clientId?: string; limit?: number }, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const query = new URLSearchParams();
+      if (params?.clientId) query.set('clientId', params.clientId);
+      if (params?.limit) query.set('limit', params.limit.toString());
+      const queryString = query.toString();
+      return fetchApi<{ calls: any[]; total: number }>(
+        `/api/calls${queryString ? '?' + queryString : ''}`,
+        { headers }
+      );
+    },
+    get: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`, { headers });
+    },
+    create: (payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>("/api/calls", { method: "POST", body: payload, headers });
+    },
+    update: (id: string, payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/calls/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: payload,
+        headers,
+      });
+    },
+    delete: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchNoBody(`/api/calls/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    },
   },
 };
 

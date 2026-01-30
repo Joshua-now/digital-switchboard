@@ -26,6 +26,7 @@ export default function Clients() {
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
+    ghlLocationId: '',
     timezone: 'America/New_York',
     quietHoursStart: '20:00',
     quietHoursEnd: '08:00',
@@ -56,6 +57,7 @@ export default function Clients() {
       setShowForm(false);
       setFormData({
         name: '',
+        ghlLocationId: '',
         timezone: 'America/New_York',
         quietHoursStart: '20:00',
         quietHoursEnd: '08:00',
@@ -135,6 +137,20 @@ export default function Clients() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  GoHighLevel Location ID
+                </label>
+                <input
+                  type="text"
+                  value={formData.ghlLocationId}
+                  onChange={(e) => setFormData({ ...formData, ghlLocationId: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter GHL Location ID"
                   required
                 />
               </div>
