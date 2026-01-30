@@ -22,20 +22,12 @@ export default function Login() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+    <div className="min-h-screen grid place-items-center p-6 bg-gray-50">
       <form
         onSubmit={handleSubmit}
-        style={{
-          width: 360,
-          padding: 24,
-          border: '1px solid #ddd',
-          borderRadius: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
+        className="w-full max-w-sm p-8 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col gap-4"
       >
-        <h2 style={{ margin: 0 }}>Sign in</h2>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-2">Sign in</h2>
 
         <input
           type="email"
@@ -43,7 +35,8 @@ export default function Login() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
           autoComplete="email"
-          style={{ padding: 10, border: '1px solid #ccc', borderRadius: 8 }}
+          className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          required
         />
 
         <input
@@ -52,12 +45,17 @@ export default function Login() {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
           autoComplete="current-password"
-          style={{ padding: 10, border: '1px solid #ccc', borderRadius: 8 }}
+          className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          required
         />
 
-        {error && <div style={{ color: 'crimson' }}>{error}</div>}
+        {error && <div className="text-red-600 text-sm">{error}</div>}
 
-        <button type="submit" disabled={loading} style={{ padding: 10, borderRadius: 8 }}>
+        <button 
+          type="submit" 
+          disabled={loading}
+          className="px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
