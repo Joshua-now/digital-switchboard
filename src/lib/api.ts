@@ -194,9 +194,39 @@ export const api = {
   },
 
   /**
+   * Clients API
+   */
+  clients: {
+    list: (token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any[]>("/api/clients", { headers });
+    },
+    get: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/clients/${encodeURIComponent(id)}`, { headers });
+    },
+    create: (payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>("/api/clients", { method: "POST", body: payload, headers });
+    },
+    update: (id: string, payload: any, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchApi<any>(`/api/clients/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: payload,
+        headers,
+      });
+    },
+    delete: (id: string, token?: string) => {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      return fetchNoBody(`/api/clients/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    },
+  },
+
+  /**
    * Calls API (guessable; adjust paths if your backend uses different routes).
    * If your backend endpoints are under /api/calls, keep these.
-   * If they are under something else, tell me the actual route names and I’ll align them.
+   * If they are under something else, tell me the actual route names and I'll align them.
    */
   calls: {
     list: () => fetchApi<any[]>("/api/calls"),
