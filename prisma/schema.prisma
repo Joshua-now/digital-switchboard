@@ -31,7 +31,7 @@ model Client {
 
 model RoutingConfig {
   id                String        @id @default(uuid())
-  clientId          String        @map("client_id")
+  clientId          String        @unique @map("client_id")
   provider          CallProvider  @default(BLAND)
   active            Boolean       @default(true)
   callWithinSeconds Int           @default(60) @map("call_within_seconds")
@@ -108,6 +108,7 @@ enum ClientStatus {
 
 enum CallProvider {
   BLAND
+  VAPI
 }
 
 enum CallStatus {

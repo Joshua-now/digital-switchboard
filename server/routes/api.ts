@@ -184,7 +184,7 @@ router.get('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: Re
 router.post('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { active, callWithinSeconds, instructions, transferNumber } = req.body;
+    const { active, callWithinSeconds, instructions, transferNumber, provider } = req.body;
 
     const config = await prisma.routingConfig.upsert({
       where: { clientId: id },
@@ -194,12 +194,14 @@ router.post('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: R
         callWithinSeconds: callWithinSeconds ?? 60,
         instructions: instructions || '',
         transferNumber: transferNumber || null,
+        provider: provider || 'BLAND',
       },
       update: {
         active,
         callWithinSeconds,
         instructions,
         transferNumber: transferNumber || null,
+        ...(provider && { provider }),
       },
     });
 

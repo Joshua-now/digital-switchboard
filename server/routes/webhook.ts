@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/db.js';
 import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/utils.js';
 import { createAuditLog } from '../lib/audit.js';
-import { createCall } from '../providers/bland.js';
+import { createCall } from '../providers/index.js';
 
 const router = express.Router();
 
@@ -253,6 +253,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     });
 
     const callResult = await createCall(
+      routingConfig.provider || 'BLAND',
       lead.id,
       clientId,
       phone,
@@ -387,6 +388,91 @@ router.post('/bland', async (req: Request, res: Response) => {
     return res.status(200).json({ message: 'Webhook processed' });
   } catch (error: any) {
     console.error('Bland webhook error:', error);
+    await createAuditLog('WEBHOOK_ERROR', error.message, undefined, {
+      payloadKeys: Object.keys(payload || {}),
+      error: error.message,
+    });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Vapi status webhook (called by Vapi after call events)
+ */
+router.post('/vapi', async (req: Request, res: Response) => {
+  const payload = req.body;
+
+  try {
+    // 🔐 Optional shared-secret auth (recommended in prod)
+    if (!verifyStaticSecret(req, 'VAPI_WEBHOOK_SECRET', 'x-webhook-secret')) {
+      await createAuditLog('WEBHOOK_FORBIDDEN', 'Invalid Vapi webhook secret', undefined, {
+        ip: req.ip,
+        payloadKeys: Object.keys(payload || {}),
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const providerCallId = payload?.call?.id || payload?.id;
+    if (!providerCallId) return res.status(400).json({ error: 'call id required' });
+
+    const call = await prisma.call.findUnique({
+      where: { providerCallId: providerCallId },
+      include: { lead: true },
+    });
+
+    if (!call) return res.status(404).json({ error: 'Call not found' });
+
+    // ✅ Idempotency: if already terminal, ignore retries
+    if (call.status === 'COMPLETED' || call.status === 'FAILED') {
+      return res.status(200).json({ message: 'Already processed' });
+    }
+
+    const messageType = payload?.message?.type || '';
+    const callStatus: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' =
+      messageType === 'end-of-call-report'
+        ? 'COMPLETED'
+        : messageType === 'status-update' && payload?.message?.status === 'ended'
+        ? 'COMPLETED'
+        : payload?.message?.status === 'failed'
+        ? 'FAILED'
+        : 'IN_PROGRESS';
+
+    const leadStatus: 'NEW' | 'QUEUED' | 'CALLING' | 'COMPLETED' | 'FAILED' | 'SKIPPED' =
+      callStatus === 'COMPLETED' ? 'COMPLETED' : callStatus === 'FAILED' ? 'FAILED' : 'CALLING';
+
+    // ✅ Store safe snapshot only
+    const providerSnapshot = safePayloadSnapshot(payload);
+
+    const transcript = payload?.message?.transcript
+      ? payload.message.transcript.map((t: any) => `${t.role}: ${t.text}`).join('\n')
+      : payload?.transcript || null;
+
+    await prisma.call.update({
+      where: { id: call.id },
+      data: {
+        status: callStatus,
+        outcome: payload?.message?.endedReason || payload?.endedReason || null,
+        transcript,
+        recordingUrl: payload?.message?.recordingUrl || payload?.recordingUrl || null,
+        rawProviderPayload: providerSnapshot,
+        endedAt: callStatus === 'COMPLETED' || callStatus === 'FAILED' ? new Date() : null,
+      },
+    });
+
+    await prisma.lead.update({
+      where: { id: call.leadId },
+      data: { callStatus: leadStatus },
+    });
+
+    await createAuditLog('CALL_UPDATED', `Vapi call status updated: ${callStatus}`, call.clientId, {
+      callId: call.id,
+      leadId: call.leadId,
+      status: callStatus,
+    });
+
+    return res.status(200).json({ message: 'Webhook processed' });
+  } catch (error: any) {
+    console.error('Vapi webhook error:', error);
     await createAuditLog('WEBHOOK_ERROR', error.message, undefined, {
       payloadKeys: Object.keys(payload || {}),
       error: error.message,

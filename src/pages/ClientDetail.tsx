@@ -21,6 +21,7 @@ interface RoutingConfig {
   instructions: string;
   questions: string[] | null;
   transferNumber: string | null;
+  provider: 'BLAND' | 'VAPI';
 }
 
 export default function ClientDetail() {
@@ -37,6 +38,7 @@ export default function ClientDetail() {
     callWithinSeconds: 60,
     instructions: '',
     transferNumber: '',
+    provider: 'BLAND' as 'BLAND' | 'VAPI',
   });
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export default function ClientDetail() {
           callWithinSeconds: configData.callWithinSeconds,
           instructions: configData.instructions,
           transferNumber: configData.transferNumber || '',
+          provider: configData.provider || 'BLAND',
         });
       } else {
         setEditMode(true);
@@ -206,6 +209,20 @@ export default function ClientDetail() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  AI Provider
+                </label>
+                <select
+                  value={formData.provider}
+                  onChange={(e) => setFormData({ ...formData, provider: e.target.value as 'BLAND' | 'VAPI' })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="BLAND">Bland AI</option>
+                  <option value="VAPI">Vapi AI</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Call Within Seconds
                 </label>
                 <input
@@ -264,6 +281,7 @@ export default function ClientDetail() {
                         callWithinSeconds: config.callWithinSeconds,
                         instructions: config.instructions,
                         transferNumber: config.transferNumber || '',
+                        provider: config.provider || 'BLAND',
                       });
                     }}
                     className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors"
@@ -280,6 +298,9 @@ export default function ClientDetail() {
                   config.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
                 }`}>
                   {config.active ? 'Active' : 'Inactive'}
+                </span>
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
+                  {config.provider === 'VAPI' ? 'Vapi AI' : 'Bland AI'}
                 </span>
                 <span className="text-gray-600">
                   Call within {config.callWithinSeconds} seconds
