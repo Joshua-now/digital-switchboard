@@ -516,6 +516,7 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
         success: false,
         error,
         leadId: lead.id,
+        vapiResponse: vapiData, // Include full Vapi response for debugging
       });
     }
   } catch (error: any) {
