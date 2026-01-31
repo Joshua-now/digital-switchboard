@@ -433,7 +433,7 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
       body: JSON.stringify(vapiPayload),
     });
 
-    const vapiData = await vapiResponse.json();
+    const vapiData: any = await vapiResponse.json();
 
     if (vapiResponse.ok && vapiData.id) {
       await prisma.call.update({
