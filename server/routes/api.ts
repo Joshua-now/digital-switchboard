@@ -330,17 +330,20 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
     }
 
     // Product-to-Assistant mapping
-    const productConfig: Record<string, { assistantId: string; name: string }> = {
+    const productConfig: Record<string, { assistantId: string; phoneNumberId: string; name: string }> = {
       'after-hours': {
         assistantId: '02b7b95b-d522-4750-ae79-97323af6473b',
+        phoneNumberId: '4f8f7dbd-529e-4d2a-ab04-3d10ade529a9',
         name: 'After Hours - Maya',
       },
       'speed-to-lead': {
         assistantId: 'c65e4f2c-be50-4d6f-b2f8-8c8a28cd7ccc',
+        phoneNumberId: '591c2405-39b7-4487-80ef-c237a570fa5c',
         name: 'Speed to Lead - Anna',
       },
       'complete-package': {
         assistantId: '2c902658-5f8d-4ac7-aa87-43e3916f53bb',
+        phoneNumberId: '5a0cecc6-6f78-4a38-9a62-0e43239def68',
         name: 'Complete Package - Riley',
       },
     };
@@ -430,6 +433,7 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
 
     const vapiPayload = {
       assistantId: config.assistantId,
+      phoneNumberId: config.phoneNumberId,
       customer: {
         number: normalizedPhone,
       },
