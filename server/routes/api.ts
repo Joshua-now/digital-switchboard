@@ -343,8 +343,9 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
     }
 
     // Create lead
-    const normalizedPhone = phone.replace(/\D/g, '');
-    const dedupeKey = `${normalizedPhone}-${product}`;
+    const digitsOnly = phone.replace(/\D/g, '');
+    const normalizedPhone = digitsOnly.startsWith('1') ? `+${digitsOnly}` : `+1${digitsOnly}`;
+    const dedupeKey = `${digitsOnly}-${product}`;
 
     const existingLead = await prisma.lead.findFirst({
       where: {
@@ -367,7 +368,7 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
         clientId: client.id,
         firstName: firstName || null,
         lastName: lastName || null,
-        phone: normalizedPhone,
+        phone: digitsOnly,
         email: email || null,
         source: source || 'aiteammate.io',
         payloadJson: { product, company, config: config.name },
@@ -434,6 +435,12 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
     });
 
     const vapiData: any = await vapiResponse.json();
+
+    console.log('[VAPI] Response', {
+      status: vapiResponse.status,
+      ok: vapiResponse.ok,
+      data: vapiData,
+    });
 
     if (vapiResponse.ok && vapiData.id) {
       await prisma.call.update({
