@@ -19,7 +19,7 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "hash-password": "node scripts/hash-password.js",
-    "start": "node dist-server/index.js"
+    "start": "npx prisma db push --accept-data-loss && node dist-server/index.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
