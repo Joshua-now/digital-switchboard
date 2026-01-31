@@ -1,8 +1,0 @@
-[build]
-builder = "nixpacks"
-buildCommand = "npm ci && npm run build"
-
-[deploy]
-startCommand = "npx prisma generate && npx prisma db push --accept-data-loss && node dist-server/index.js"
-healthcheckPath = "/health"
-healthcheckTimeout = 100
