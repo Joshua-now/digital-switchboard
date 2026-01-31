@@ -281,4 +281,211 @@ router.get('/calls', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// DIRECT LEAD INGESTION (for aiteammate.io forms, n8n, etc.)
+router.post('/leads/create', async (req: AuthRequest, res: Response) => {
+  try {
+    const { firstName, lastName, phone, email, company, product, source } = req.body;
+
+    if (!phone) {
+      res.status(400).json({ error: 'Phone number required' });
+      return;
+    }
+
+    if (!product) {
+      res.status(400).json({ error: 'Product field required (after-hours, speed-to-lead, complete-package)' });
+      return;
+    }
+
+    // Product-to-Assistant mapping
+    const productConfig: Record<string, { assistantId: string; phoneNumberId: string; name: string }> = {
+      'after-hours': {
+        assistantId: '02b7b95b-d522-4750-ae79-97323af6473b',
+        phoneNumberId: '+13213369547',
+        name: 'After Hours - Maya',
+      },
+      'speed-to-lead': {
+        assistantId: 'c65e4f2c-be50-4d6f-b2f8-8c8a28cd7ccc',
+        phoneNumberId: '+13213369584',
+        name: 'Speed to Lead - Anna',
+      },
+      'complete-package': {
+        assistantId: '2c902658-5f8d-4ac7-aa87-43e3916f53bb',
+        phoneNumberId: '+13217324022',
+        name: 'Complete Package - Riley',
+      },
+    };
+
+    const config = productConfig[product];
+    if (!config) {
+      res.status(400).json({ 
+        error: 'Invalid product',
+        validProducts: Object.keys(productConfig),
+      });
+      return;
+    }
+
+    // Create a "system" client for aiteammate.io leads if it doesn't exist
+    let client = await prisma.client.findFirst({
+      where: { ghlLocationId: 'aiteammate-system' },
+    });
+
+    if (!client) {
+      client = await prisma.client.create({
+        data: {
+          name: 'AI Teammate (System)',
+          ghlLocationId: 'aiteammate-system',
+          timezone: 'America/New_York',
+          quietHoursStart: '23:00',
+          quietHoursEnd: '07:00',
+          status: 'ACTIVE',
+        },
+      });
+    }
+
+    // Create lead
+    const normalizedPhone = phone.replace(/\D/g, '');
+    const dedupeKey = `${normalizedPhone}-${product}`;
+
+    const existingLead = await prisma.lead.findFirst({
+      where: {
+        clientId: client.id,
+        dedupeKey,
+      },
+    });
+
+    if (existingLead) {
+      res.status(200).json({
+        message: 'Lead already exists',
+        leadId: existingLead.id,
+        duplicate: true,
+      });
+      return;
+    }
+
+    const lead = await prisma.lead.create({
+      data: {
+        clientId: client.id,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        phone: normalizedPhone,
+        email: email || null,
+        source: source || 'aiteammate.io',
+        payloadJson: { product, company, config: config.name },
+        dedupeKey,
+        callStatus: 'NEW',
+      },
+    });
+
+    await createAuditLog('LEAD_CREATED', `Lead created for ${config.name}`, client.id, {
+      leadId: lead.id,
+      product,
+    });
+
+    // Immediately trigger Vapi call
+    const vapiApiKey = process.env.VAPI_API_KEY;
+    if (!vapiApiKey) {
+      res.status(500).json({ error: 'VAPI_API_KEY not configured' });
+      return;
+    }
+
+    const call = await prisma.call.create({
+      data: {
+        clientId: client.id,
+        leadId: lead.id,
+        provider: 'VAPI',
+        status: 'CREATED',
+      },
+    });
+
+    const vapiPayload = {
+      assistantId: config.assistantId,
+      customer: {
+        number: normalizedPhone,
+      },
+      phoneNumberId: config.phoneNumberId,
+      assistantOverrides: {
+        variableValues: {
+          firstName: firstName || 'there',
+          company: company || '',
+          transferNumber: process.env.TRANSFER_NUMBER || '+13214719858',
+        },
+        recordingEnabled: true,
+      },
+      metadata: {
+        leadId: lead.id,
+        product,
+        internalCallId: call.id,
+      },
+    };
+
+    console.log('[VAPI] Initiating call', {
+      product: config.name,
+      phone: normalizedPhone,
+      assistantId: config.assistantId,
+    });
+
+    const vapiResponse = await fetch('https://api.vapi.ai/call/phone', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${vapiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(vapiPayload),
+    });
+
+    const vapiData = await vapiResponse.json();
+
+    if (vapiResponse.ok && vapiData.id) {
+      await prisma.call.update({
+        where: { id: call.id },
+        data: {
+          providerCallId: vapiData.id,
+          status: 'IN_PROGRESS',
+          startedAt: new Date(),
+        },
+      });
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { callStatus: 'CALLING' },
+      });
+
+      await createAuditLog('CALL_INITIATED', `Vapi call initiated - ${config.name}`, client.id, {
+        leadId: lead.id,
+        callId: vapiData.id,
+        product,
+      });
+
+      res.status(201).json({
+        success: true,
+        leadId: lead.id,
+        callId: vapiData.id,
+        message: `AI will call ${normalizedPhone} within 60 seconds`,
+        agent: config.name,
+      });
+    } else {
+      const error = vapiData.error || vapiData.message || 'Call failed';
+      
+      await prisma.call.update({
+        where: { id: call.id },
+        data: { status: 'FAILED', outcome: error },
+      });
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { callStatus: 'FAILED', skipReason: error },
+      });
+
+      res.status(500).json({
+        success: false,
+        error,
+        leadId: lead.id,
+      });
+    }
+  } catch (error: any) {
+    console.error('Error creating lead:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
 export default router;
