@@ -281,6 +281,39 @@ router.get('/calls', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// CLEAR TEST DATA (for development)
+router.delete('/leads/clear-test', async (req: AuthRequest, res: Response) => {
+  try {
+    const client = await prisma.client.findFirst({
+      where: { ghlLocationId: 'aiteammate-system' },
+    });
+
+    if (!client) {
+      res.status(200).json({ message: 'No test client found' });
+      return;
+    }
+
+    // Delete calls first (foreign key constraint)
+    const callsDeleted = await prisma.call.deleteMany({
+      where: { clientId: client.id },
+    });
+
+    // Then delete leads
+    const leadsDeleted = await prisma.lead.deleteMany({
+      where: { clientId: client.id },
+    });
+
+    res.status(200).json({
+      message: 'Test data cleared',
+      leadsDeleted: leadsDeleted.count,
+      callsDeleted: callsDeleted.count,
+    });
+  } catch (error: any) {
+    console.error('Error clearing test data:', error);
+    res.status(500).json({ error: 'Failed to clear test data' });
+  }
+});
+
 // DIRECT LEAD INGESTION (for aiteammate.io forms, n8n, etc.)
 router.post('/leads/create', async (req: AuthRequest, res: Response) => {
   try {
