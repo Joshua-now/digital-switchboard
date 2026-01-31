@@ -433,7 +433,9 @@ router.post('/leads/create', async (req: AuthRequest, res: Response) => {
 
     const vapiPayload = {
       assistantId: config.assistantId,
-      phoneNumber: config.phoneNumber,
+      phoneNumber: {
+        number: config.phoneNumber,
+      },
       customer: {
         number: normalizedPhone,
       },
