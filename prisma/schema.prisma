@@ -19,7 +19,7 @@ model Client {
   ghlLocationId   String?       @unique @map("ghl_location_id")
 
   createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  updatedAt       DateTime      @default(now()) @updatedAt
 
   routingConfigs  RoutingConfig[]
   leads           Lead[]
@@ -91,7 +91,7 @@ model Call {
 model AuditLog {
   id        String    @id @default(uuid())
   clientId  String?   @map("client_id")
-  eventType String    @map("event_type")
+  eventType String    @default("SYSTEM") @map("event_type")
   message   String    @db.Text
   dataJson  Json?     @map("data_json")
   createdAt DateTime  @default(now()) @map("created_at")
