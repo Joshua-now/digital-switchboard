@@ -15,8 +15,8 @@ model Client {
   quietHoursStart String        @default("20:00")
   quietHoursEnd   String        @default("08:00")
 
-  // GoHighLevel sub-account / location mapping (required for multi-client routing)
-  ghlLocationId   String        @unique @map("ghl_location_id")
+  // GoHighLevel sub-account / location mapping (optional — not all clients use GHL)
+  ghlLocationId   String?       @unique @map("ghl_location_id")
 
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -109,6 +109,7 @@ enum ClientStatus {
 enum CallProvider {
   BLAND
   VAPI
+  TELNYX
 }
 
 enum CallStatus {
