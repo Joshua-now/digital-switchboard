@@ -18,33 +18,41 @@ export async function seedSuperAdmin(): Promise<void> {
   }
 
   try {
-    // Always find or update the SUPER_ADMIN role user first
     const existingSuperAdmin = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' } });
+    const byEmail = await prisma.user.findUnique({ where: { email } });
 
-    if (existingSuperAdmin) {
-      // Update email + password hash regardless of what email was previously set
-      const needsUpdate = existingSuperAdmin.email !== email || existingSuperAdmin.passwordHash !== passwordHash;
-      if (needsUpdate) {
-        await prisma.user.update({
-          where: { id: existingSuperAdmin.id },
-          data: { email, passwordHash },
-        });
-        console.log(`[seed] Super admin updated → ${email}`);
+    if (existingSuperAdmin && existingSuperAdmin.email === email) {
+      // Already correct — just sync password if needed
+      if (existingSuperAdmin.passwordHash !== passwordHash) {
+        await prisma.user.update({ where: { id: existingSuperAdmin.id }, data: { passwordHash } });
+        console.log('[seed] Super admin password updated');
       } else {
         console.log('[seed] Super admin already up to date');
       }
       return;
     }
 
-    // No SUPER_ADMIN exists — create one (handle email collision with existing non-admin user)
-    const byEmail = await prisma.user.findUnique({ where: { email } });
-    if (byEmail) {
-      // Promote the existing user to super admin and clear agency
+    if (byEmail && byEmail.role !== 'SUPER_ADMIN') {
+      // The target email belongs to a non-super-admin — promote it, remove old super admin
+      if (existingSuperAdmin) {
+        await prisma.user.delete({ where: { id: existingSuperAdmin.id } });
+        console.log('[seed] Removed old super admin record');
+      }
       await prisma.user.update({
-        where: { email },
+        where: { id: byEmail.id },
         data: { role: 'SUPER_ADMIN', agencyId: null, passwordHash },
       });
-      console.log(`[seed] Promoted existing user to super admin: ${email}`);
+      console.log(`[seed] Promoted ${email} to super admin`);
+      return;
+    }
+
+    if (existingSuperAdmin) {
+      // Update old super admin's email
+      await prisma.user.update({
+        where: { id: existingSuperAdmin.id },
+        data: { email, passwordHash },
+      });
+      console.log(`[seed] Super admin email updated to ${email}`);
       return;
     }
 
