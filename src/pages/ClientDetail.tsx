@@ -162,7 +162,7 @@ export default function ClientDetail() {
     } finally {
       setLoading(false);
     }
-  }, [token, id]);
+  }, [user, id]);
 
   useEffect(() => {
     if (user) loadData();
@@ -242,7 +242,7 @@ export default function ClientDetail() {
         ...config,
         active: !config.active,
         transferNumber: config.transferNumber,
-      }, token);
+      });
       setToast({ message: config.active ? 'Calling paused' : 'Calling activated', type: 'success' });
       await loadData();
     } catch (error: any) {

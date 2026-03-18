@@ -122,7 +122,7 @@ export default function Clients() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [user]);
 
   useEffect(() => { if (user) loadClients(); }, [user, loadClients]);
 
