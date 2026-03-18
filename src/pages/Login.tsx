@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
@@ -14,8 +15,6 @@ export default function Login() {
 
     try {
       await login(email.trim(), password);
-      // If you have routing, your app should redirect based on user state.
-      // Leave navigation to your route guard / App logic.
     } catch (err: any) {
       setError(err?.message || 'Login failed');
     }
@@ -49,15 +48,24 @@ export default function Login() {
           required
         />
 
-        {error && <div className="text-red-600 text-sm">{error}</div>}
+        {error && (
+          <div className="text-red-600 text-sm bg-red-50 px-3 py-2 rounded-lg">{error}</div>
+        )}
 
-        <button 
-          type="submit" 
+        <button
+          type="submit"
           disabled={loading}
           className="px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
+
+        <p className="text-center text-sm text-gray-500">
+          Don't have an account?{' '}
+          <Link to="/signup" className="text-blue-600 hover:underline font-medium">
+            Sign up
+          </Link>
+        </p>
       </form>
     </div>
   );

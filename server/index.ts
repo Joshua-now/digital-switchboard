@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { checkDatabaseConnection } from './lib/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { seedSuperAdmin } from './lib/seedSuperAdmin.js';
 import webhookRouter from './routes/webhook.js';
 import apiRouter from './routes/api.js';
 import path from 'path';
@@ -86,6 +87,8 @@ async function startServer() {
     const dbHealthy = await checkDatabaseConnection();
     if (!dbHealthy) {
       console.error('Database connection failed. Server may not function correctly.');
+    } else {
+      await seedSuperAdmin();
     }
 
     app.listen(PORT, () => {

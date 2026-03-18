@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { Database, Filter, Eye } from 'lucide-react';
+import { Database, Filter, Eye, Search, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface Lead {
@@ -25,9 +25,21 @@ interface Lead {
   }>;
 }
 
+const PAGE_SIZE = 25;
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'All Statuses' },
+  { value: 'NEW', label: 'New' },
+  { value: 'QUEUED', label: 'Queued' },
+  { value: 'CALLING', label: 'Calling' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'SKIPPED', label: 'Skipped' },
+];
+
 export default function Leads() {
   const [searchParams] = useSearchParams();
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -35,15 +47,36 @@ export default function Leads() {
 
   const clientId = searchParams.get('client') || undefined;
 
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(0);
+
+  // Debounce search input
   useEffect(() => {
-    loadLeads();
-  }, [token, clientId]);
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-  const loadLeads = async () => {
-    if (!token) return;
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, clientId]);
 
+  const loadLeads = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
     try {
-      const data = await api.leads.list({ clientId, limit: 50 }, token);
+      const data = await api.leads.list({
+        clientId,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+        search: search || undefined,
+        status: statusFilter || undefined,
+      });
       setLeads(data.leads);
       setTotal(data.total);
     } catch (error) {
@@ -51,7 +84,11 @@ export default function Leads() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, clientId, search, statusFilter, page]);
+
+  useEffect(() => {
+    loadLeads();
+  }, [loadLeads]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -65,33 +102,81 @@ export default function Leads() {
     return colors[status] || 'bg-gray-100 text-gray-700';
   };
 
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const start = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const end = Math.min((page + 1) * PAGE_SIZE, total);
+
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Leads</h1>
-            <p className="text-gray-600 mt-1">Total: {total} leads</p>
+            <p className="text-gray-600 mt-1">
+              {total > 0 ? `${start}–${end} of ${total} leads` : `${total} leads`}
+            </p>
           </div>
           {clientId && (
             <Link
               to="/leads"
-              className="text-blue-600 hover:text-blue-700 flex items-center gap-2"
+              className="text-blue-600 hover:text-blue-700 flex items-center gap-2 text-sm"
             >
               <Filter className="w-4 h-4" />
-              Clear Filter
+              Clear Client Filter
             </Link>
           )}
         </div>
 
+        {/* Search + filter bar */}
+        <div className="flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search name, phone, email…"
+              className="w-full pl-9 pr-9 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            />
+            {searchInput && (
+              <button
+                onClick={() => { setSearchInput(''); setSearch(''); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-white"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
         {loading ? (
           <div className="text-center py-12">
-            <p className="text-gray-600">Loading leads...</p>
+            <div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="text-gray-500 text-sm">Loading leads...</p>
           </div>
         ) : leads.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
             <Database className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600">No leads found.</p>
+            <p className="text-gray-600">
+              {search || statusFilter ? 'No leads match your filters.' : 'No leads found.'}
+            </p>
+            {(search || statusFilter) && (
+              <button
+                onClick={() => { setSearchInput(''); setSearch(''); setStatusFilter(''); }}
+                className="mt-3 text-sm text-blue-600 hover:text-blue-700"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
@@ -162,6 +247,34 @@ export default function Leads() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
+                <p className="text-sm text-gray-500">
+                  {start}–{end} of {total}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm text-gray-600 font-medium">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

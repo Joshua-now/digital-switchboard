@@ -1,15 +1,19 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { api } from '../lib/api';
 
-type User = {
+export type User = {
   email: string;
-  isAdmin: boolean;
+  name: string | null;
+  role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+  agencyId: string | null;
+  agencyName: string | null;
 };
 
 type AuthContextType = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  signup: (agencyName: string, name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -27,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const me = await api.auth.me();
         if (!mounted) return;
-        setUser(me.user);
+        setUser(me.user as User);
       } catch {
         if (!mounted) return;
         setUser(null);
@@ -45,9 +49,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      await api.auth.login(email, password); // sets cookie server-side
-      const me = await api.auth.me();
-      setUser(me.user);
+      const res = await api.auth.login(email, password);
+      setUser(res.user as User);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signup = async (agencyName: string, name: string, email: string, password: string) => {
+    setLoading(true);
+    try {
+      const res = await api.auth.signup(agencyName, name, email, password);
+      setUser(res.user as User);
     } finally {
       setLoading(false);
     }
@@ -65,7 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading]);
+  const value = useMemo(
+    () => ({ user, loading, login, signup, logout }),
+    [user, loading]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

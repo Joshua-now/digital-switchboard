@@ -1,22 +1,35 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import { prisma } from '../lib/db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@switchboard.local';
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
-export interface AuthRequest extends Request {
-  user?: {
-    email: string;
-    isAdmin: boolean;
-  };
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  userId: string;
+  email: string;
+  name: string | null;
+  role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+  agencyId: string | null;
+  agencyName: string | null;
 }
 
-export async function verifyPassword(
-  password: string,
-  hash: string
-): Promise<boolean> {
+export interface AuthRequest extends Request {
+  user?: AuthUser;
+}
+
+interface JwtPayload {
+  userId: string;
+  email: string;
+  role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+  agencyId: string | null;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
 
@@ -24,48 +37,30 @@ export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
-export function generateToken(email: string): string {
-  return jwt.sign({ email, isAdmin: true }, JWT_SECRET, { expiresIn: '7d' });
+export function generateToken(payload: JwtPayload): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 
-export function verifyToken(token: string): { email: string; isAdmin: boolean } | null {
+export function decodeToken(token: string): JwtPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as {
-      email: string;
-      isAdmin: boolean;
-    };
-    return decoded;
-  } catch (error) {
+    return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  } catch {
     return null;
   }
 }
 
-export async function authenticateAdmin(
-  email: string,
-  password: string
-): Promise<string | null> {
-  if (email !== ADMIN_EMAIL) {
-    return null;
-  }
+// ─── Middleware ───────────────────────────────────────────────────────────────
 
-  if (!ADMIN_PASSWORD_HASH) {
-    console.error('ADMIN_PASSWORD_HASH not configured');
-    return null;
-  }
-
-  const isValid = await verifyPassword(password, ADMIN_PASSWORD_HASH);
-  if (!isValid) {
-    return null;
-  }
-
-  return generateToken(email);
-}
-
-export function requireAuth(
+/**
+ * requireAuth — validates JWT then does a live DB lookup so we can:
+ *   - catch suspended agencies in real-time
+ *   - always return fresh user/agency data
+ */
+export async function requireAuth(
   req: AuthRequest,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
 
   if (!token) {
@@ -73,12 +68,65 @@ export function requireAuth(
     return;
   }
 
-  const user = verifyToken(token);
-  if (!user) {
+  const payload = decodeToken(token);
+  if (!payload || !payload.userId) {
+    // Old-format JWT (pre-multi-tenant) or malformed — force re-login
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
 
-  req.user = user;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { agency: true },
+    });
+
+    if (!user) {
+      res.status(401).json({ error: 'User not found' });
+      return;
+    }
+
+    if (user.agency && user.agency.status === 'SUSPENDED') {
+      res.status(403).json({ error: 'Account suspended. Please contact support.' });
+      return;
+    }
+
+    req.user = {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as 'SUPER_ADMIN' | 'AGENCY_ADMIN',
+      agencyId: user.agencyId,
+      agencyName: user.agency?.name ?? null,
+    };
+
+    next();
+  } catch (err) {
+    console.error('requireAuth DB error:', err);
+    res.status(500).json({ error: 'Authentication error' });
+  }
+}
+
+/**
+ * requireSuperAdmin — must come after requireAuth
+ */
+export function requireSuperAdmin(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (req.user?.role !== 'SUPER_ADMIN') {
+    res.status(403).json({ error: 'Super admin access required' });
+    return;
+  }
   next();
+}
+
+/**
+ * agencyScope — returns a Prisma `where` fragment that isolates data by agency.
+ * Super admins bypass the filter and see everything.
+ */
+export function agencyScope(user: AuthUser): { agencyId?: string } {
+  if (user.role === 'SUPER_ADMIN') return {};
+  return { agencyId: user.agencyId as string };
 }

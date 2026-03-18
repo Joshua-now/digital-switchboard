@@ -99,6 +99,15 @@ async function fetchApi<T>(
     const msg =
       (data && (data.error || data.message)) ||
       `Request failed (${res.status})`;
+
+    // 401 on any non-auth endpoint → stale/invalid token → force re-login
+    if (res.status === 401 && !path.includes('/auth/')) {
+      const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/signup';
+      if (!isAuthPage) {
+        window.location.href = '/login';
+      }
+    }
+
     throw new ApiError(msg, res.status, data);
   }
 
@@ -137,40 +146,69 @@ export const api = {
   },
 
   auth: {
-    /**
-     * Returns the currently authenticated user/session.
-     * Your confirmed working response shape:
-     * { user: { email, isAdmin, iat, exp } }
-     */
     me: () =>
       fetchApi<{
         user: {
           email: string;
-          isAdmin: boolean;
-          iat?: number;
-          exp?: number;
-          [k: string]: any;
+          name: string | null;
+          role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+          agencyId: string | null;
+          agencyName: string | null;
         };
       }>("/api/auth/me"),
 
-    /**
-     * Login with email/password.
-     * Adjust response shape if your backend returns something else.
-     */
     login: (email: string, password: string) =>
       fetchApi<{
-        success?: boolean;
-        user?: { email: string; isAdmin: boolean; [k: string]: any };
-        [k: string]: any;
+        success: boolean;
+        user: {
+          email: string;
+          name: string | null;
+          role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+          agencyId: string | null;
+          agencyName: string | null;
+        };
       }>("/api/auth/login", {
         method: "POST",
         body: { email, password },
       }),
 
-    /**
-     * Logout / clear session cookie.
-     */
+    signup: (agencyName: string, name: string, email: string, password: string) =>
+      fetchApi<{
+        success: boolean;
+        user: {
+          email: string;
+          name: string | null;
+          role: 'SUPER_ADMIN' | 'AGENCY_ADMIN';
+          agencyId: string | null;
+          agencyName: string | null;
+        };
+      }>("/api/auth/signup", {
+        method: "POST",
+        body: { agencyName, name, email, password },
+      }),
+
     logout: () => fetchNoBody("/api/auth/logout", { method: "POST" }),
+  },
+
+  /**
+   * Super-admin agency management
+   */
+  admin: {
+    agencies: {
+      list: () =>
+        fetchApi<{
+          id: string;
+          name: string;
+          status: 'ACTIVE' | 'SUSPENDED';
+          createdAt: string;
+          _count: { users: number; clients: number };
+        }[]>("/api/admin/agencies"),
+      update: (id: string, data: { status: 'ACTIVE' | 'SUSPENDED' }) =>
+        fetchApi<any>(`/api/admin/agencies/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: data,
+        }),
+    },
   },
 
   /**
@@ -239,11 +277,14 @@ export const api = {
    * Leads API
    */
   leads: {
-    list: (params?: { clientId?: string; limit?: number }, token?: string) => {
+    list: (params?: { clientId?: string; limit?: number; offset?: number; search?: string; status?: string }, token?: string) => {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const query = new URLSearchParams();
       if (params?.clientId) query.set('clientId', params.clientId);
       if (params?.limit) query.set('limit', params.limit.toString());
+      if (params?.offset !== undefined) query.set('offset', params.offset.toString());
+      if (params?.search) query.set('search', params.search);
+      if (params?.status) query.set('status', params.status);
       const queryString = query.toString();
       return fetchApi<{ leads: any[]; total: number }>(
         `/api/leads${queryString ? '?' + queryString : ''}`,
@@ -276,11 +317,13 @@ export const api = {
    * Calls API
    */
   calls: {
-    list: (params?: { clientId?: string; limit?: number }, token?: string) => {
+    list: (params?: { clientId?: string; limit?: number; offset?: number; status?: string }, token?: string) => {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const query = new URLSearchParams();
       if (params?.clientId) query.set('clientId', params.clientId);
       if (params?.limit) query.set('limit', params.limit.toString());
+      if (params?.offset !== undefined) query.set('offset', params.offset.toString());
+      if (params?.status) query.set('status', params.status);
       const queryString = query.toString();
       return fetchApi<{ calls: any[]; total: number }>(
         `/api/calls${queryString ? '?' + queryString : ''}`,

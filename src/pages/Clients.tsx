@@ -398,7 +398,7 @@ export default function Clients() {
                           </Link>
                           <button
                             onClick={() => setDeleteTarget(client)}
-                            className="inline-flex items-center gap-1.5 text-red-500 hover:text-red-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                            className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
                             title="Delete client"
                           >
                             <Trash2 className="w-4 h-4" />

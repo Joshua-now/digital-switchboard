@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { Phone, Filter, ExternalLink } from 'lucide-react';
+import { Phone, Filter, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface Call {
@@ -26,9 +26,19 @@ interface Call {
   };
 }
 
+const PAGE_SIZE = 25;
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'All Statuses' },
+  { value: 'CREATED', label: 'Created' },
+  { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'FAILED', label: 'Failed' },
+];
+
 export default function Calls() {
   const [searchParams] = useSearchParams();
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [calls, setCalls] = useState<Call[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -36,15 +46,24 @@ export default function Calls() {
 
   const clientId = searchParams.get('client') || undefined;
 
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(0);
+
+  // Reset page when filters change
   useEffect(() => {
-    loadCalls();
-  }, [token, clientId]);
+    setPage(0);
+  }, [statusFilter, clientId]);
 
-  const loadCalls = async () => {
-    if (!token) return;
-
+  const loadCalls = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
     try {
-      const data = await api.calls.list({ clientId, limit: 50 }, token);
+      const data = await api.calls.list({
+        clientId,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+        status: statusFilter || undefined,
+      });
       setCalls(data.calls);
       setTotal(data.total);
     } catch (error) {
@@ -52,7 +71,11 @@ export default function Calls() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, clientId, statusFilter, page]);
+
+  useEffect(() => {
+    loadCalls();
+  }, [loadCalls]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -73,33 +96,63 @@ export default function Calls() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const start = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const end = Math.min((page + 1) * PAGE_SIZE, total);
+
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Calls</h1>
-            <p className="text-gray-600 mt-1">Total: {total} calls</p>
+            <p className="text-gray-600 mt-1">
+              {total > 0 ? `${start}–${end} of ${total} calls` : `${total} calls`}
+            </p>
           </div>
           {clientId && (
             <Link
               to="/calls"
-              className="text-blue-600 hover:text-blue-700 flex items-center gap-2"
+              className="text-blue-600 hover:text-blue-700 flex items-center gap-2 text-sm"
             >
               <Filter className="w-4 h-4" />
-              Clear Filter
+              Clear Client Filter
             </Link>
           )}
         </div>
 
+        {/* Filter bar */}
+        <div className="flex flex-wrap gap-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-white"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
         {loading ? (
           <div className="text-center py-12">
-            <p className="text-gray-600">Loading calls...</p>
+            <div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="text-gray-500 text-sm">Loading calls...</p>
           </div>
         ) : calls.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
             <Phone className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600">No calls found.</p>
+            <p className="text-gray-600">
+              {statusFilter ? 'No calls match your filter.' : 'No calls found.'}
+            </p>
+            {statusFilter && (
+              <button
+                onClick={() => setStatusFilter('')}
+                className="mt-3 text-sm text-blue-600 hover:text-blue-700"
+              >
+                Clear filter
+              </button>
+            )}
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
@@ -172,6 +225,34 @@ export default function Calls() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
+                <p className="text-sm text-gray-500">
+                  {start}–{end} of {total}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm text-gray-600 font-medium">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

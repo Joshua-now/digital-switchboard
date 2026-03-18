@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import Admin from "./pages/Admin";
 import Calls from "./pages/Calls";
 import Clients from "./pages/Clients";
 import ClientDetail from "./pages/ClientDetail";
@@ -18,7 +20,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 function GuestOnly({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
   if (loading) return null;
-  if (user) return <Navigate to="/calls" replace />;
+  if (user) return <Navigate to="/clients" replace />;
   return children;
 }
 
@@ -26,7 +28,7 @@ function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/calls" replace />} />
+        <Route path="/" element={<Navigate to="/clients" replace />} />
 
         <Route
           path="/login"
@@ -34,6 +36,24 @@ function AppRoutes() {
             <GuestOnly>
               <Login />
             </GuestOnly>
+          }
+        />
+
+        <Route
+          path="/signup"
+          element={
+            <GuestOnly>
+              <Signup />
+            </GuestOnly>
+          }
+        />
+
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth>
+              <Admin />
+            </RequireAuth>
           }
         />
 
@@ -72,7 +92,7 @@ function AppRoutes() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/calls" replace />} />
+        <Route path="*" element={<Navigate to="/clients" replace />} />
       </Routes>
     </BrowserRouter>
   );

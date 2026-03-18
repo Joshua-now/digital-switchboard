@@ -19,6 +19,7 @@ interface Client {
   timezone: string;
   quietHoursStart: string;
   quietHoursEnd: string;
+  ghlLocationId?: string | null;
 }
 
 interface RoutingConfig {
@@ -116,6 +117,15 @@ export default function ClientDetail() {
   const [editMode, setEditMode] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [switchingProvider, setSwitchingProvider] = useState(false);
+  const [editClientMode, setEditClientMode] = useState(false);
+  const [editClientData, setEditClientData] = useState({
+    name: '',
+    timezone: 'America/New_York',
+    quietHoursStart: '20:00',
+    quietHoursEnd: '08:00',
+    ghlLocationId: '',
+  });
+  const [savingClient, setSavingClient] = useState(false);
 
   const [formData, setFormData] = useState({
     provider: 'BLAND' as CallProvider,
@@ -250,6 +260,40 @@ export default function ClientDetail() {
     }
   };
 
+  const openEditClient = () => {
+    if (!client) return;
+    setEditClientData({
+      name: client.name,
+      timezone: client.timezone,
+      quietHoursStart: client.quietHoursStart,
+      quietHoursEnd: client.quietHoursEnd,
+      ghlLocationId: client.ghlLocationId || '',
+    });
+    setEditClientMode(true);
+  };
+
+  const handleSaveClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setSavingClient(true);
+    try {
+      await api.clients.update(id, {
+        name: editClientData.name,
+        timezone: editClientData.timezone,
+        quietHoursStart: editClientData.quietHoursStart,
+        quietHoursEnd: editClientData.quietHoursEnd,
+        ghlLocationId: editClientData.ghlLocationId || null,
+      });
+      setToast({ message: 'Client updated!', type: 'success' });
+      setEditClientMode(false);
+      await loadData();
+    } catch (error: any) {
+      setToast({ message: error?.message || 'Failed to update client', type: 'error' });
+    } finally {
+      setSavingClient(false);
+    }
+  };
+
   // --- Render states ---
 
   if (loading && !client) {
@@ -293,6 +337,99 @@ export default function ClientDetail() {
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
 
+      {editClientMode && client && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900">Edit Client</h2>
+              <button onClick={() => setEditClientMode(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveClient} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Client Name <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={editClientData.name}
+                  onChange={(e) => setEditClientData({ ...editClientData, name: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Timezone</label>
+                  <select
+                    value={editClientData.timezone}
+                    onChange={(e) => setEditClientData({ ...editClientData, timezone: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  >
+                    <option value="America/New_York">Eastern (ET)</option>
+                    <option value="America/Chicago">Central (CT)</option>
+                    <option value="America/Denver">Mountain (MT)</option>
+                    <option value="America/Los_Angeles">Pacific (PT)</option>
+                    <option value="America/Phoenix">Arizona (no DST)</option>
+                    <option value="Pacific/Honolulu">Hawaii (HT)</option>
+                    <option value="America/Anchorage">Alaska (AKT)</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Quiet Start</label>
+                    <input
+                      type="time"
+                      value={editClientData.quietHoursStart}
+                      onChange={(e) => setEditClientData({ ...editClientData, quietHoursStart: e.target.value })}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Quiet End</label>
+                    <input
+                      type="time"
+                      value={editClientData.quietHoursEnd}
+                      onChange={(e) => setEditClientData({ ...editClientData, quietHoursEnd: e.target.value })}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  GHL Location ID <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={editClientData.ghlLocationId}
+                  onChange={(e) => setEditClientData({ ...editClientData, ghlLocationId: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                  placeholder="e.g. lZTzSBpnbKPGIKH4xyzA"
+                />
+                <p className="text-xs text-gray-400 mt-1">Used to match inbound webhooks by location.</p>
+              </div>
+              <div className="flex gap-3 pt-2 border-t border-gray-100">
+                <button
+                  type="submit"
+                  disabled={savingClient || !editClientData.name.trim()}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
+                >
+                  {savingClient ? <><RefreshCw className="w-4 h-4 animate-spin" />Saving...</> : <><CheckCircle2 className="w-4 h-4" />Save Changes</>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditClientMode(false)}
+                  className="bg-gray-100 text-gray-700 px-6 py-2.5 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-start gap-4">
@@ -321,6 +458,13 @@ export default function ClientDetail() {
               {client.timezone} · Quiet hours {client.quietHoursStart}–{client.quietHoursEnd}
             </p>
           </div>
+          <button
+            onClick={openEditClient}
+            className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium shrink-0"
+            title="Edit client settings"
+          >
+            <Pencil className="w-3.5 h-3.5" />Edit
+          </button>
           <button
             onClick={loadData}
             disabled={loading}
