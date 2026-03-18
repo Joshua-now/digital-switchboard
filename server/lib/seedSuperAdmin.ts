@@ -16,19 +16,29 @@ export async function seedSuperAdmin(): Promise<void> {
   }
 
   try {
-    const existing = await prisma.user.findUnique({ where: { email } });
+    // Check if a user with the target email already exists
+    const byEmail = await prisma.user.findUnique({ where: { email } });
 
-    if (existing) {
-      // Keep password hash in sync in case it was rotated via env var
-      if (existing.passwordHash !== passwordHash) {
-        await prisma.user.update({
-          where: { email },
-          data: { passwordHash },
-        });
-        console.log('[seed] Super admin password hash updated from env var');
+    if (byEmail) {
+      // Already on the right email — sync password hash if rotated
+      if (byEmail.passwordHash !== passwordHash) {
+        await prisma.user.update({ where: { email }, data: { passwordHash } });
+        console.log('[seed] Super admin password hash updated');
       } else {
         console.log('[seed] Super admin already exists — no action needed');
       }
+      return;
+    }
+
+    // No user with the new email — check if there's an existing SUPER_ADMIN to migrate
+    const existingSuperAdmin = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' } });
+
+    if (existingSuperAdmin) {
+      await prisma.user.update({
+        where: { id: existingSuperAdmin.id },
+        data: { email, passwordHash },
+      });
+      console.log(`[seed] Super admin email updated to ${email}`);
       return;
     }
 
