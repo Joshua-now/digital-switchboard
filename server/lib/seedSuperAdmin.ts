@@ -66,7 +66,7 @@ export async function seedSuperAdmin(): Promise<void> {
 
   // --- AI Teammates agency owner ---
   try {
-    const agency = await prisma.agency.findFirst({ where: { name: 'AI Teammates' } });
+    const agency = await prisma.agency.findFirst({ where: { name: { contains: 'AI Teammate' } } });
     if (!agency) {
       console.log('[seed] AI Teammates agency not found — skipping agency user seed');
       return;
