@@ -1,10 +1,12 @@
 import { prisma } from './db.js';
 
+// AI Teammates agency owner — fixed credentials bootstrapped on startup
+const AI_TEAMMATES_EMAIL = 'jbbrown09@gmail.com';
+const AI_TEAMMATES_HASH  = '$2b$10$uZjjlN4xRf7n0VgrzstFB.jd2Rzut1i6bYDsNwbFph/D9lg54I.J.'; // BobDog11$$
+
 /**
- * On startup, ensure a SUPER_ADMIN user exists using the legacy env-var
- * credentials (ADMIN_EMAIL + ADMIN_PASSWORD_HASH).  This makes the migration
- * seamless — Troy keeps the same login, the data just moves from env vars
- * into the users table.
+ * On startup, ensure a SUPER_ADMIN user exists using the env-var credentials
+ * and that the AI Teammates agency owner account is set up correctly.
  */
 export async function seedSuperAdmin(): Promise<void> {
   const email = process.env.ADMIN_EMAIL;
@@ -55,5 +57,38 @@ export async function seedSuperAdmin(): Promise<void> {
     console.log(`[seed] Super admin created: ${email}`);
   } catch (err) {
     console.error('[seed] Failed to seed super admin:', err);
+  }
+
+  // --- AI Teammates agency owner ---
+  try {
+    const agency = await prisma.agency.findFirst({ where: { name: 'AI Teammates' } });
+    if (!agency) {
+      console.log('[seed] AI Teammates agency not found — skipping agency user seed');
+      return;
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email: AI_TEAMMATES_EMAIL } });
+
+    if (existingUser) {
+      // Ensure password hash and agencyId are correct
+      await prisma.user.update({
+        where: { email: AI_TEAMMATES_EMAIL },
+        data: { passwordHash: AI_TEAMMATES_HASH, agencyId: agency.id, role: 'AGENCY_ADMIN' },
+      });
+      console.log(`[seed] AI Teammates user updated: ${AI_TEAMMATES_EMAIL}`);
+    } else {
+      await prisma.user.create({
+        data: {
+          email: AI_TEAMMATES_EMAIL,
+          passwordHash: AI_TEAMMATES_HASH,
+          name: 'Joshua Brown',
+          role: 'AGENCY_ADMIN',
+          agencyId: agency.id,
+        },
+      });
+      console.log(`[seed] AI Teammates user created: ${AI_TEAMMATES_EMAIL}`);
+    }
+  } catch (err) {
+    console.error('[seed] Failed to seed AI Teammates user:', err);
   }
 }
