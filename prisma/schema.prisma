@@ -45,8 +45,8 @@ model Client {
   name            String
   status          ClientStatus  @default(ACTIVE)
   timezone        String        @default("America/New_York")
-  quietHoursStart String        @default("20:00") @map("quiet_hours_start")
-  quietHoursEnd   String        @default("08:00") @map("quiet_hours_end")
+  quietHoursStart String?       @map("quiet_hours_start")
+  quietHoursEnd   String?       @map("quiet_hours_end")
 
   // GoHighLevel sub-account / location mapping (optional)
   ghlLocationId   String?       @unique @map("ghl_location_id")

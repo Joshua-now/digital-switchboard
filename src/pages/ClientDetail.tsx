@@ -17,8 +17,8 @@ interface Client {
   name: string;
   status: 'ACTIVE' | 'INACTIVE';
   timezone: string;
-  quietHoursStart: string;
-  quietHoursEnd: string;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
   ghlLocationId?: string | null;
 }
 
@@ -121,8 +121,8 @@ export default function ClientDetail() {
   const [editClientData, setEditClientData] = useState({
     name: '',
     timezone: 'America/New_York',
-    quietHoursStart: '20:00',
-    quietHoursEnd: '08:00',
+    quietHoursStart: '',
+    quietHoursEnd: '',
     ghlLocationId: '',
   });
   const [savingClient, setSavingClient] = useState(false);
@@ -265,8 +265,8 @@ export default function ClientDetail() {
     setEditClientData({
       name: client.name,
       timezone: client.timezone,
-      quietHoursStart: client.quietHoursStart,
-      quietHoursEnd: client.quietHoursEnd,
+      quietHoursStart: client.quietHoursStart ?? '',
+      quietHoursEnd: client.quietHoursEnd ?? '',
       ghlLocationId: client.ghlLocationId || '',
     });
     setEditClientMode(true);
@@ -280,8 +280,8 @@ export default function ClientDetail() {
       await api.clients.update(id, {
         name: editClientData.name,
         timezone: editClientData.timezone,
-        quietHoursStart: editClientData.quietHoursStart,
-        quietHoursEnd: editClientData.quietHoursEnd,
+        quietHoursStart: editClientData.quietHoursStart || null,
+        quietHoursEnd: editClientData.quietHoursEnd || null,
         ghlLocationId: editClientData.ghlLocationId || null,
       });
       setToast({ message: 'Client updated!', type: 'success' });
@@ -455,7 +455,7 @@ export default function ClientDetail() {
               </button>
             </div>
             <p className="text-gray-500 text-sm mt-0.5">
-              {client.timezone} · Quiet hours {client.quietHoursStart}–{client.quietHoursEnd}
+              {client.timezone} · Always on (no quiet hours)
             </p>
           </div>
           <button

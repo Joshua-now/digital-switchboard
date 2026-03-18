@@ -27,9 +27,11 @@ export function normalizePhone(phone: string, defaultCountry: string = 'US'): st
 
 export function isWithinQuietHours(
   timezone: string,
-  quietStart: string,
-  quietEnd: string
+  quietStart: string | null | undefined,
+  quietEnd: string | null | undefined
 ): boolean {
+  // No quiet hours configured — always call
+  if (!quietStart || !quietEnd) return false;
   try {
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', {
