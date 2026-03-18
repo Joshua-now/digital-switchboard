@@ -44,7 +44,7 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       return;
     }
 
-    const contactId = payload.contactId || payload.contact?.id;
+    const contactId = payload.contactId || payload.contact_id || payload.contact?.id;
     const dedupeKey = generateDedupeKey(contactId, phone);
 
     const existingLead = await prisma.lead.findUnique({
@@ -63,8 +63,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
     const lead = await prisma.lead.create({
       data: {
         clientId,
-        firstName: payload.firstName || payload.contact?.firstName || null,
-        lastName: payload.lastName || payload.contact?.lastName || null,
+        firstName: payload.firstName || payload.first_name || payload.contact?.firstName || null,
+        lastName: payload.lastName || payload.last_name || payload.contact?.lastName || null,
         phone,
         email: payload.email || payload.contact?.email || null,
         source: payload.source || 'gohighlevel',
