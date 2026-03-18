@@ -103,7 +103,7 @@ function ProviderCard({ provider, selected, onClick }: { provider: CallProvider;
 
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [client, setClient] = useState<Client | null>(null);
@@ -126,13 +126,13 @@ export default function ClientDetail() {
   });
 
   const loadData = useCallback(async () => {
-    if (!token || !id) return;
+    if (!user || !id) return;
     setLoading(true);
     setLoadError(null);
     try {
       const [clientData, configData] = await Promise.all([
-        api.clients.get(id, token),
-        api.clients.getRoutingConfig(id, token).catch(() => null), // Don't let missing config crash the page
+        api.clients.get(id),
+        api.clients.getRoutingConfig(id).catch(() => null), // Don't let missing config crash the page
       ]);
 
       setClient(clientData);
@@ -165,8 +165,8 @@ export default function ClientDetail() {
   }, [token, id]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (user) loadData();
+  }, [user, loadData]);
 
   const webhookUrl = `${window.location.origin}/webhook/gohighlevel/${id}`;
 
@@ -178,7 +178,7 @@ export default function ClientDetail() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !id) return;
+    if (!id) return;
     if (!formData.instructions.trim()) {
       setToast({ message: 'Instructions are required', type: 'error' });
       return;
@@ -188,7 +188,7 @@ export default function ClientDetail() {
       await api.clients.saveRoutingConfig(id, {
         ...formData,
         transferNumber: formData.transferNumber || null,
-      }, token);
+      });
       setToast({ message: 'Configuration saved!', type: 'success' });
       await loadData();
     } catch (error: any) {
@@ -201,7 +201,7 @@ export default function ClientDetail() {
 
   // One-click provider switch without entering full edit mode
   const switchProvider = async (newProvider: CallProvider) => {
-    if (!token || !id || !config || newProvider === config.provider) return;
+    if (!id || !config || newProvider === config.provider) return;
     setSwitchingProvider(true);
     try {
       await api.clients.saveRoutingConfig(id, {
@@ -210,7 +210,7 @@ export default function ClientDetail() {
         callWithinSeconds: config.callWithinSeconds,
         instructions: config.instructions,
         transferNumber: config.transferNumber,
-      }, token);
+      });
       setToast({ message: `Switched to ${PROVIDER_META[newProvider].label}`, type: 'success' });
       await loadData();
     } catch (error: any) {
@@ -221,10 +221,10 @@ export default function ClientDetail() {
   };
 
   const toggleClientStatus = async () => {
-    if (!token || !id || !client) return;
+    if (!id || !client) return;
     const newStatus = client.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     try {
-      await api.clients.update(id, { status: newStatus }, token);
+      await api.clients.update(id, { status: newStatus });
       setToast({
         message: `Client ${newStatus === 'ACTIVE' ? 'activated' : 'deactivated'}`,
         type: 'success',
@@ -236,7 +236,7 @@ export default function ClientDetail() {
   };
 
   const toggleConfigActive = async () => {
-    if (!token || !id || !config) return;
+    if (!id || !config) return;
     try {
       await api.clients.saveRoutingConfig(id, {
         ...config,

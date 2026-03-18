@@ -92,7 +92,7 @@ const TZ_LABEL: Record<string, string> = {
 };
 
 export default function Clients() {
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -110,11 +110,11 @@ export default function Clients() {
   });
 
   const loadClients = useCallback(async () => {
-    if (!token) return;
+    if (!user) return;
     setLoading(true);
     setLoadError(false);
     try {
-      const data = await api.clients.list(token);
+      const data = await api.clients.list();
       setClients(data);
     } catch (error) {
       console.error('Failed to load clients:', error);
@@ -124,14 +124,14 @@ export default function Clients() {
     }
   }, [token]);
 
-  useEffect(() => { loadClients(); }, [loadClients]);
+  useEffect(() => { if (user) loadClients(); }, [user, loadClients]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !formData.name.trim()) return;
+    if (!formData.name.trim()) return;
     setSubmitting(true);
     try {
-      await api.clients.create(formData, token);
+      await api.clients.create(formData);
       setShowForm(false);
       setFormData({ name: '', timezone: 'America/New_York', quietHoursStart: '20:00', quietHoursEnd: '08:00' });
       setToast({ message: `"${formData.name}" created successfully!`, type: 'success' });
@@ -145,10 +145,10 @@ export default function Clients() {
   };
 
   const handleDelete = async () => {
-    if (!token || !deleteTarget) return;
+    if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.clients.delete(deleteTarget.id, token);
+      await api.clients.delete(deleteTarget.id);
       setToast({ message: `"${deleteTarget.name}" deleted`, type: 'success' });
       setDeleteTarget(null);
       loadClients();
