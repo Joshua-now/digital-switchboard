@@ -541,6 +541,21 @@ router.get('/admin/agencies', requireAuth, requireSuperAdmin, async (req: AuthRe
   }
 });
 
+// One-time migration: assign orphaned clients (agencyId = null) to named agency
+router.post('/admin/migrate-clients', requireAuth, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { agencyName } = req.body;
+    if (!agencyName) { res.status(400).json({ error: 'agencyName required' }); return; }
+    const agency = await prisma.agency.findFirst({ where: { name: agencyName } });
+    if (!agency) { res.status(404).json({ error: `Agency "${agencyName}" not found` }); return; }
+    const result = await prisma.client.updateMany({ where: { agencyId: null }, data: { agencyId: agency.id } });
+    res.json({ migrated: result.count, agencyId: agency.id });
+  } catch (err) {
+    console.error('Migration error:', err);
+    res.status(500).json({ error: 'Migration failed' });
+  }
+});
+
 router.patch('/admin/agencies/:id', requireAuth, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { status } = req.body;
