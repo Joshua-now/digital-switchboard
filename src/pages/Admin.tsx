@@ -10,7 +10,6 @@ import {
 type AgencyClient = {
   id: string;
   name: string;
-  phone: string;
   status: string;
   _count: { leads: number; calls: number };
 };
@@ -241,7 +240,6 @@ export default function Admin() {
                           <thead>
                             <tr className="bg-gray-50 border-b border-gray-100">
                               <th className="text-left px-12 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Client</th>
-                              <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Phone</th>
                               <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Leads</th>
                               <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Calls</th>
                               <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Status</th>
@@ -251,7 +249,6 @@ export default function Admin() {
                             {agency.clients.map((client) => (
                               <tr key={client.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-12 py-3 font-medium text-gray-800">{client.name}</td>
-                                <td className="px-4 py-3 text-gray-500 font-mono text-xs">{client.phone || '—'}</td>
                                 <td className="px-4 py-3 text-gray-600">{client._count.leads}</td>
                                 <td className="px-4 py-3 text-gray-600">{client._count.calls}</td>
                                 <td className="px-4 py-3">

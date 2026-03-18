@@ -526,7 +526,6 @@ router.get('/admin/agencies', requireAuth, requireSuperAdmin, async (req: AuthRe
           select: {
             id: true,
             name: true,
-            phone: true,
             status: true,
             _count: { select: { leads: true, calls: true } },
           },
