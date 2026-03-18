@@ -2,7 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { Building2, Users, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import {
+  Building2, Users, RefreshCw, CheckCircle, XCircle,
+  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck,
+} from 'lucide-react';
+
+type AgencyClient = {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  _count: { leads: number; calls: number };
+};
 
 type Agency = {
   id: string;
@@ -10,6 +21,7 @@ type Agency = {
   status: 'ACTIVE' | 'SUSPENDED';
   createdAt: string;
   _count: { users: number; clients: number };
+  clients: AgencyClient[];
 };
 
 export default function Admin() {
@@ -19,8 +31,8 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // Guard — non-super-admins should never see this page
   if (user && user.role !== 'SUPER_ADMIN') {
     return <Navigate to="/clients" replace />;
   }
@@ -57,6 +69,21 @@ export default function Admin() {
     }
   };
 
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const totalClients = agencies.reduce((s, a) => s + a._count.clients, 0);
+  const totalLeads = agencies.reduce(
+    (s, a) => s + a.clients.reduce((cs, c) => cs + c._count.leads, 0), 0
+  );
+  const totalCalls = agencies.reduce(
+    (s, a) => s + a.clients.reduce((cs, c) => cs + c._count.calls, 0), 0
+  );
   const activeCount = agencies.filter((a) => a.status === 'ACTIVE').length;
   const suspendedCount = agencies.filter((a) => a.status === 'SUSPENDED').length;
 
@@ -83,10 +110,10 @@ export default function Admin() {
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
 
         {/* Stats row */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-5 gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="text-2xl font-bold text-gray-900">{agencies.length}</div>
-            <div className="text-sm text-gray-500 mt-0.5">Total Agencies</div>
+            <div className="text-sm text-gray-500 mt-0.5">Agencies</div>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="text-2xl font-bold text-green-600">{activeCount}</div>
@@ -96,55 +123,81 @@ export default function Admin() {
             <div className="text-2xl font-bold text-red-500">{suspendedCount}</div>
             <div className="text-sm text-gray-500 mt-0.5">Suspended</div>
           </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="text-2xl font-bold text-gray-900">{totalLeads}</div>
+            <div className="text-sm text-gray-500 mt-0.5">Total Leads</div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="text-2xl font-bold text-gray-900">{totalCalls}</div>
+            <div className="text-sm text-gray-500 mt-0.5">Total Calls</div>
+          </div>
         </div>
 
-        {/* Agencies table */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          {loading && agencies.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-sm">Loading agencies…</div>
-          ) : error ? (
-            <div className="p-12 text-center text-red-500 text-sm">{error}</div>
-          ) : agencies.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-sm">
-              No agencies yet. Contractors sign up at /signup.
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Agency</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Users</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Clients</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Created</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Status</th>
-                  <th className="px-5 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {agencies.map((agency) => (
-                  <tr key={agency.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                          <Building2 size={15} className="text-blue-600" />
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900">{agency.name}</div>
-                          <div className="text-xs text-gray-400 font-mono">{agency.id.slice(0, 8)}…</div>
-                        </div>
+        {/* Agency cards */}
+        {loading && agencies.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+            Loading agencies…
+          </div>
+        ) : error ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-red-500 text-sm">
+            {error}
+          </div>
+        ) : agencies.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+            No agencies yet. Contractors sign up at /signup.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {agencies.map((agency) => {
+              const isOpen = expanded.has(agency.id);
+              const agencyLeads = agency.clients.reduce((s, c) => s + c._count.leads, 0);
+              const agencyCalls = agency.clients.reduce((s, c) => s + c._count.calls, 0);
+
+              return (
+                <div key={agency.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  {/* Agency header row */}
+                  <div
+                    className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => toggleExpand(agency.id)}
+                  >
+                    {/* Expand toggle */}
+                    <div className="text-gray-400 flex-shrink-0">
+                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </div>
+
+                    {/* Agency icon + name */}
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <Building2 size={16} className="text-blue-600" />
                       </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-1.5 text-gray-600">
+                      <div>
+                        <div className="font-semibold text-gray-900">{agency.name}</div>
+                        <div className="text-xs text-gray-400 font-mono">{agency.id.slice(0, 8)}…</div>
+                      </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="flex items-center gap-6 text-sm text-gray-600">
+                      <div className="flex items-center gap-1.5">
                         <Users size={13} className="text-gray-400" />
-                        {agency._count.users}
+                        <span>{agency._count.users} user{agency._count.users !== 1 ? 's' : ''}</span>
                       </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-600">{agency._count.clients}</td>
-                    <td className="px-5 py-3.5 text-gray-500">
-                      {new Date(agency.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5">
+                        <UserCheck size={13} className="text-gray-400" />
+                        <span>{agency._count.clients} client{agency._count.clients !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Phone size={13} className="text-gray-400" />
+                        <span>{agencyLeads} lead{agencyLeads !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <PhoneCall size={13} className="text-gray-400" />
+                        <span>{agencyCalls} call{agencyCalls !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+
+                    {/* Status badge */}
+                    <div className="flex-shrink-0">
                       {agency.status === 'ACTIVE' ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-1 rounded-full">
                           <CheckCircle size={11} />
@@ -156,30 +209,72 @@ export default function Admin() {
                           Suspended
                         </span>
                       )}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <button
-                        onClick={() => toggleStatus(agency)}
-                        disabled={toggling === agency.id}
-                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${
-                          agency.status === 'ACTIVE'
-                            ? 'text-red-600 hover:bg-red-50'
-                            : 'text-green-700 hover:bg-green-50'
-                        }`}
-                      >
-                        {toggling === agency.id
-                          ? '…'
-                          : agency.status === 'ACTIVE'
-                          ? 'Suspend'
-                          : 'Activate'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                    </div>
+
+                    {/* Suspend/Activate button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleStatus(agency); }}
+                      disabled={toggling === agency.id}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0 ${
+                        agency.status === 'ACTIVE'
+                          ? 'text-red-600 hover:bg-red-50'
+                          : 'text-green-700 hover:bg-green-50'
+                      }`}
+                    >
+                      {toggling === agency.id
+                        ? '…'
+                        : agency.status === 'ACTIVE'
+                        ? 'Suspend'
+                        : 'Activate'}
+                    </button>
+                  </div>
+
+                  {/* Expanded client list */}
+                  {isOpen && (
+                    <div className="border-t border-gray-100">
+                      {agency.clients.length === 0 ? (
+                        <div className="px-12 py-4 text-sm text-gray-400 italic">
+                          No clients yet under this agency.
+                        </div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-100">
+                              <th className="text-left px-12 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Client</th>
+                              <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Phone</th>
+                              <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Leads</th>
+                              <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Calls</th>
+                              <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs uppercase tracking-wide">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {agency.clients.map((client) => (
+                              <tr key={client.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-12 py-3 font-medium text-gray-800">{client.name}</td>
+                                <td className="px-4 py-3 text-gray-500 font-mono text-xs">{client.phone || '—'}</td>
+                                <td className="px-4 py-3 text-gray-600">{client._count.leads}</td>
+                                <td className="px-4 py-3 text-gray-600">{client._count.calls}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${
+                                    client.status === 'ACTIVE'
+                                      ? 'text-green-700 bg-green-50'
+                                      : 'text-gray-500 bg-gray-100'
+                                  }`}>
+                                    {client.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

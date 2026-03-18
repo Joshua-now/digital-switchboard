@@ -522,6 +522,16 @@ router.get('/admin/agencies', requireAuth, requireSuperAdmin, async (req: AuthRe
     const agencies = await prisma.agency.findMany({
       include: {
         _count: { select: { users: true, clients: true } },
+        clients: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            status: true,
+            _count: { select: { leads: true, calls: true } },
+          },
+          orderBy: { name: 'asc' },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
