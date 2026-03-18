@@ -144,6 +144,35 @@ router.put('/clients/:id', requireAuth, async (req: AuthRequest, res: Response) 
   }
 });
 
+// PATCH is an alias for PUT (frontend uses PATCH for partial updates)
+router.patch('/clients/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, timezone, quietHoursStart, quietHoursEnd, status, ghlLocationId } = req.body;
+
+    const client = await prisma.client.update({
+      where: { id: req.params.id },
+      data: {
+        ...(name && { name }),
+        ...(timezone && { timezone }),
+        ...(quietHoursStart && { quietHoursStart }),
+        ...(quietHoursEnd && { quietHoursEnd }),
+        ...(status && { status }),
+        ...(ghlLocationId !== undefined ? { ghlLocationId: ghlLocationId || null } : {}),
+      },
+    });
+
+    await createAuditLog('CLIENT_UPDATED', `Client updated: ${client.name}`, client.id);
+    res.json(client);
+  } catch (error: any) {
+    console.error('Error updating client:', error);
+    if (error?.code === 'P2002') {
+      res.status(409).json({ error: 'A client with that GHL Location ID already exists' });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update client' });
+  }
+});
+
 router.delete('/clients/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const client = await prisma.client.delete({
@@ -242,10 +271,55 @@ router.post('/clients/:id/routing-config', requireAuth, async (req: AuthRequest,
   }
 });
 
-// Alias for /routing-config
+// Alias for /routing-config — duplicate handler (internal redirect hack doesn't work in Express)
 router.post('/clients/:id/routing', requireAuth, async (req: AuthRequest, res: Response) => {
-  req.url = req.url.replace('/routing', '/routing-config');
-  (router as any).handle(req, res, () => {});
+  try {
+    const { active, callWithinSeconds, instructions, questions, transferNumber, provider } = req.body;
+    const clientId = req.params.id;
+
+    if (!instructions) {
+      res.status(400).json({ error: 'Instructions are required' });
+      return;
+    }
+
+    const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
+    const resolvedProvider = provider && validProviders.includes(provider) ? provider : undefined;
+
+    const existingConfig = await prisma.routingConfig.findFirst({ where: { clientId } });
+
+    let config;
+    if (existingConfig) {
+      config = await prisma.routingConfig.update({
+        where: { id: existingConfig.id },
+        data: {
+          active: active !== undefined ? active : existingConfig.active,
+          callWithinSeconds: callWithinSeconds || existingConfig.callWithinSeconds,
+          instructions,
+          questions: questions !== undefined ? questions : existingConfig.questions,
+          transferNumber: transferNumber !== undefined ? (transferNumber || null) : existingConfig.transferNumber,
+          ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
+        },
+      });
+    } else {
+      config = await prisma.routingConfig.create({
+        data: {
+          clientId,
+          active: active !== undefined ? active : true,
+          callWithinSeconds: callWithinSeconds || 60,
+          instructions,
+          questions: questions || null,
+          transferNumber: transferNumber || null,
+          ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
+        },
+      });
+    }
+
+    await createAuditLog('ROUTING_CONFIG_UPDATED', `Routing config updated (provider: ${config.provider})`, clientId);
+    res.json(config);
+  } catch (error) {
+    console.error('Error saving routing config:', error);
+    res.status(500).json({ error: 'Failed to save routing config' });
+  }
 });
 
 router.get('/leads', requireAuth, async (req: AuthRequest, res: Response) => {
