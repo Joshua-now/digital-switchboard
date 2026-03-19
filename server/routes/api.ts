@@ -218,8 +218,8 @@ router.post('/clients', requireAuth, async (req: AuthRequest, res: Response) => 
       data: {
         name: name.trim(),
         timezone: timezone || 'America/New_York',
-        quietHoursStart: quietHoursStart || '20:00',
-        quietHoursEnd: quietHoursEnd || '08:00',
+        quietHoursStart: quietHoursStart || null,
+        quietHoursEnd: quietHoursEnd || null,
         status: status || 'ACTIVE',
         agencyId: req.user!.agencyId,
         ...(ghlLocationId?.trim() ? { ghlLocationId: ghlLocationId.trim() } : {}),
@@ -257,8 +257,8 @@ async function updateClient(req: AuthRequest, res: Response): Promise<void> {
       data: {
         ...(name && { name }),
         ...(timezone && { timezone }),
-        ...(quietHoursStart && { quietHoursStart }),
-        ...(quietHoursEnd && { quietHoursEnd }),
+        ...('quietHoursStart' in req.body ? { quietHoursStart: quietHoursStart || null } : {}),
+        ...('quietHoursEnd' in req.body ? { quietHoursEnd: quietHoursEnd || null } : {}),
         ...(status && { status }),
         ...(ghlLocationId !== undefined ? { ghlLocationId: ghlLocationId || null } : {}),
       },

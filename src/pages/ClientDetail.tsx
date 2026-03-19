@@ -468,7 +468,9 @@ export default function ClientDetail() {
               </button>
             </div>
             <p className="text-gray-500 text-sm mt-0.5">
-              {client.timezone} · Always on (no quiet hours)
+              {client.timezone} · {client.quietHoursStart && client.quietHoursEnd
+                ? `Quiet ${client.quietHoursStart}–${client.quietHoursEnd}`
+                : 'Always on (no quiet hours)'}
             </p>
           </div>
           <button
