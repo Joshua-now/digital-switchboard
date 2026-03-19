@@ -16,13 +16,14 @@ const api = axios.create({
 });
 
 /**
- * Makes an outbound AI call via Telnyx.
+ * Makes an outbound AI call via Telnyx TeXML AI Calls endpoint.
  *
- * The TeXML app (TELNYX_APP_ID) is linked to the AI assistant.
- * When the call is answered Telnyx automatically starts the AI
- * conversation — no second action needed.
+ * Uses /texml/ai_calls/{connection_id} which is the correct Telnyx endpoint
+ * for outbound AI calls. The AIAssistantId param tells Telnyx which assistant
+ * to use — it auto-starts the conversation when the call is answered.
  *
- * client_state carries metadata back through webhook events.
+ * Lead/client IDs are embedded in the StatusCallbackUrl query string so we
+ * can correlate status events back to DB records.
  */
 export async function makeTelnyxCall(
   phone: string,
@@ -36,52 +37,30 @@ export async function makeTelnyxCall(
 ): Promise<{ callId: string; status: string }> {
   if (!TELNYX_API_KEY) throw new Error('TELNYX_API_KEY not set');
 
-  const clientState = Buffer.from(
-    JSON.stringify({ leadId, clientId, internalCallId, transferNumber })
-  ).toString('base64');
-
   const resolvedAssistantId = assistantId || TELNYX_ASSISTANT_ID;
 
-  const payload: Record<string, unknown> = {
-    connection_id: TELNYX_APP_ID,
-    to: phone,
-    from: TELNYX_PHONE_NUMBER,
-    webhook_url: `${BASE_URL}/webhook/telnyx`,
-    webhook_url_method: 'POST',
-    client_state: clientState,
-    // Pass ai_assistant_id at call creation so Telnyx auto-starts AI on answer.
-    // There is no separate /actions/ai_assist endpoint — auto-start is the only mechanism.
-    ...(resolvedAssistantId ? { ai_assistant_id: resolvedAssistantId } : {}),
-  };
+  // Encode IDs in callback URL query params — TeXML callbacks don't support client_state
+  const callbackUrl = `${BASE_URL}/webhook/telnyx?leadId=${encodeURIComponent(leadId)}&clientId=${encodeURIComponent(clientId)}&callId=${encodeURIComponent(internalCallId)}`;
 
-  // Pass dynamic variables via custom headers (if assistant supports them)
-  if (firstName) {
-    (payload as any).custom_headers = [
-      { name: 'X-First-Name', value: firstName },
-    ];
-  }
-
-  const response = await api.post('/calls', payload);
-  const callControlId = response.data?.data?.call_control_id as string;
-
-  if (!callControlId) {
-    throw new Error('No call_control_id in Telnyx response');
-  }
-
-  return { callId: callControlId, status: 'CREATED' };
-}
-
-/**
- * Start the AI assistant on an answered outbound call.
- * Must be called after the call.answered webhook event.
- */
-export async function startTelnyxAI(
-  callControlId: string,
-  assistantId: string
-): Promise<void> {
-  await api.post(`/calls/${callControlId}/actions/ai_assist`, {
-    ai_assistant_id: assistantId,
+  const response = await api.post(`/texml/ai_calls/${TELNYX_APP_ID}`, {
+    From: TELNYX_PHONE_NUMBER,
+    To: phone,
+    AIAssistantId: resolvedAssistantId,
+    StatusCallbackUrl: callbackUrl,
+    StatusCallbackMethod: 'POST',
   });
+
+  // TeXML response uses CallSid; fall back to call_control_id if present
+  const callId =
+    (response.data?.CallSid as string) ||
+    (response.data?.data?.CallSid as string) ||
+    (response.data?.data?.call_control_id as string);
+
+  if (!callId) {
+    throw new Error('No call ID in Telnyx TeXML AI response');
+  }
+
+  return { callId, status: 'CREATED' };
 }
 
 /** Dial an outbound call leg for warm transfer AMD flow (no AI — just a regular call) */

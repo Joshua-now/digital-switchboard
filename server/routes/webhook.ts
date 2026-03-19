@@ -416,24 +416,61 @@ router.post('/telnyx/transfer', async (req: Request, res: Response) => {
 });
 
 // ─── Telnyx callback ───────────────────────────────────────────────────────────
-// Telnyx expects a fast 200. Always respond first, then process async.
+// Handles BOTH:
+//   1. TeXML AI call status callbacks (form body: CallSid, CallStatus, etc.)
+//      IDs come from URL query params: ?leadId=&clientId=&callId=
+//   2. Call Control JSON events (warm-transfer leg: client_reference_id)
+// Always respond 200 immediately — Telnyx retries on non-2xx.
 router.post('/telnyx', async (req: Request, res: Response) => {
-  res.sendStatus(200); // Acknowledge immediately
+  res.sendStatus(200);
 
   try {
+    // ── Path A: TeXML status callback (form-encoded body with CallStatus) ──
+    const callStatus = req.body?.CallStatus as string | undefined;
+    if (callStatus) {
+      const { leadId, clientId, callId: internalCallId } = req.query as Record<string, string>;
+      const callSid = req.body?.CallSid as string | undefined;
+
+      console.log(`[telnyx-texml] ${callStatus} | lead:${leadId} | sid:${callSid}`);
+
+      if (!leadId || !clientId || !internalCallId) return;
+
+      if (callStatus === 'in-progress' || callStatus === 'answered') {
+        await prisma.call.updateMany({
+          where: { id: internalCallId },
+          data: { status: 'IN_PROGRESS', providerCallId: callSid },
+        });
+        await prisma.lead.updateMany({ where: { id: leadId }, data: { callStatus: 'CALLING' } });
+        await createAuditLog('telnyx_call_answered', 'Telnyx AI call answered', clientId, { leadId, callSid });
+      } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer') {
+        await prisma.call.updateMany({
+          where: { id: internalCallId },
+          data: { status: callStatus === 'completed' ? 'COMPLETED' : 'FAILED', endedAt: new Date() },
+        });
+        await prisma.lead.updateMany({
+          where: { id: leadId },
+          data: { callStatus: callStatus === 'completed' ? 'COMPLETED' : 'FAILED' },
+        });
+        await createAuditLog('telnyx_call_completed', `Telnyx AI call ${callStatus}`, clientId, { leadId, callSid });
+      }
+      return;
+    }
+
+    // ── Path B: Call Control JSON event ──
     const event = req.body?.data;
     if (!event) return;
 
     const eventType = event.event_type as string;
     const payload = event.payload ?? {};
 
-    // ── Warm-transfer leg events (Joshua's outbound call — no client_state) ──
+    // Warm-transfer leg events (Joshua's outbound call)
     const clientRef = (payload.client_reference_id as string) || '';
     if (clientRef.startsWith('transfer_from_')) {
       await handleTransferLegEvent(eventType, payload as Record<string, unknown>);
       return;
     }
 
+    // Legacy client_state path (kept for any old Call Control calls still in flight)
     const clientState = payload.client_state
       ? decodeTelnyxClientState(payload.client_state as string)
       : null;
@@ -450,62 +487,34 @@ router.post('/telnyx', async (req: Request, res: Response) => {
 
     switch (eventType) {
       case 'call.initiated':
-        await prisma.call.updateMany({
-          where: { id: internalCallId },
-          data: { status: 'IN_PROGRESS' },
-        });
-        await createAuditLog('telnyx_call_initiated', 'Telnyx call initiated', clientId, {
-          leadId, callControlId,
-        });
+        await prisma.call.updateMany({ where: { id: internalCallId }, data: { status: 'IN_PROGRESS' } });
+        await createAuditLog('telnyx_call_initiated', 'Telnyx call initiated', clientId, { leadId, callControlId });
         break;
 
-      case 'call.answered': {
-        await prisma.call.updateMany({
-          where: { id: internalCallId },
-          data: { status: 'IN_PROGRESS', providerCallId: callControlId },
-        });
-        await prisma.lead.updateMany({
-          where: { id: leadId },
-          data: { callStatus: 'CALLING' },
-        });
-        // AI assistant auto-starts via ai_assistant_id passed at call creation.
-        await createAuditLog('telnyx_call_answered', 'Telnyx call answered', clientId, {
-          leadId, callControlId,
-        });
+      case 'call.answered':
+        await prisma.call.updateMany({ where: { id: internalCallId }, data: { status: 'IN_PROGRESS', providerCallId: callControlId } });
+        await prisma.lead.updateMany({ where: { id: leadId }, data: { callStatus: 'CALLING' } });
+        await createAuditLog('telnyx_call_answered', 'Telnyx call answered', clientId, { leadId, callControlId });
         break;
-      }
 
       case 'call.hangup': {
         const hangupCause = payload.hangup_cause as string | undefined;
         const callDuration = payload.call_duration_secs as number | undefined;
-
-        await prisma.call.updateMany({
-          where: { id: internalCallId },
-          data: { status: 'COMPLETED', endedAt: new Date() },
-        });
-        await prisma.lead.updateMany({
-          where: { id: leadId },
-          data: { callStatus: 'COMPLETED' },
-        });
-        await createAuditLog('telnyx_call_completed', 'Telnyx call completed', clientId, {
-          leadId, callControlId, hangupCause, callDuration,
-        });
+        await prisma.call.updateMany({ where: { id: internalCallId }, data: { status: 'COMPLETED', endedAt: new Date() } });
+        await prisma.lead.updateMany({ where: { id: leadId }, data: { callStatus: 'COMPLETED' } });
+        await createAuditLog('telnyx_call_completed', 'Telnyx call completed', clientId, { leadId, callControlId, hangupCause, callDuration });
         break;
       }
 
       case 'call.recording.saved': {
         const recordingUrl = payload.recording_urls?.mp3 as string | undefined;
         if (recordingUrl) {
-          await prisma.call.updateMany({
-            where: { id: internalCallId },
-            data: { recordingUrl },
-          });
+          await prisma.call.updateMany({ where: { id: internalCallId }, data: { recordingUrl } });
         }
         break;
       }
 
       default:
-        // Ignored: call.bridged, call.dtmf_received, etc.
         break;
     }
   } catch (err: any) {
