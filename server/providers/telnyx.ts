@@ -26,12 +26,13 @@ const api = axios.create({
  */
 export async function makeTelnyxCall(
   phone: string,
-  instructions: string,
+  instructions: string | null,
   transferNumber: string | null,
   leadId: string,
   clientId: string,
   internalCallId: string,
-  firstName?: string
+  firstName?: string,
+  assistantId?: string
 ): Promise<{ callId: string; status: string }> {
   if (!TELNYX_API_KEY) throw new Error('TELNYX_API_KEY not set');
 
@@ -46,7 +47,7 @@ export async function makeTelnyxCall(
     webhook_url: `${BASE_URL}/webhook/telnyx`,
     webhook_url_method: 'POST',
     client_state: clientState,
-    ai_assistant_id: TELNYX_ASSISTANT_ID,
+    ai_assistant_id: assistantId || TELNYX_ASSISTANT_ID,
   };
 
   // Pass dynamic variables via custom headers (if assistant supports them)

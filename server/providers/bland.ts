@@ -3,7 +3,7 @@ import { createAuditLog } from '../lib/audit.js';
 
 interface BlandCallRequest {
   phone_number: string;
-  task: string;
+  task?: string;
 
   // Optional knobs supported by Bland
   persona_id?: string;
