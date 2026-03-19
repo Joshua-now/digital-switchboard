@@ -30,6 +30,7 @@ interface RoutingConfig {
   instructions: string;
   questions: string[] | null;
   transferNumber: string | null;
+  telnyxAssistantId: string | null;
   updatedAt?: string;
 }
 
@@ -133,6 +134,7 @@ export default function ClientDetail() {
     callWithinSeconds: 60,
     instructions: '',
     transferNumber: '',
+    telnyxAssistantId: '',
   });
 
   const loadData = useCallback(async () => {
@@ -154,6 +156,7 @@ export default function ClientDetail() {
           callWithinSeconds: configData.callWithinSeconds,
           instructions: configData.instructions,
           transferNumber: configData.transferNumber || '',
+          telnyxAssistantId: configData.telnyxAssistantId || '',
         });
         setEditMode(false);
       } else {
@@ -198,6 +201,7 @@ export default function ClientDetail() {
       await api.clients.saveRoutingConfig(id, {
         ...formData,
         transferNumber: formData.transferNumber || null,
+        telnyxAssistantId: formData.telnyxAssistantId || null,
       });
       setToast({ message: 'Configuration saved!', type: 'success' });
       await loadData();
@@ -220,6 +224,7 @@ export default function ClientDetail() {
         callWithinSeconds: config.callWithinSeconds,
         instructions: config.instructions,
         transferNumber: config.transferNumber,
+        telnyxAssistantId: config.telnyxAssistantId,
       });
       setToast({ message: `Switched to ${PROVIDER_META[newProvider].label}`, type: 'success' });
       await loadData();
@@ -584,6 +589,7 @@ export default function ClientDetail() {
                           callWithinSeconds: config.callWithinSeconds,
                           instructions: config.instructions,
                           transferNumber: config.transferNumber || '',
+                          telnyxAssistantId: config.telnyxAssistantId || '',
                         });
                       }}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium"
@@ -671,6 +677,23 @@ export default function ClientDetail() {
                     <p className="text-xs text-gray-400 mt-1">Include country code. The AI will transfer hot leads to this number.</p>
                   </div>
 
+                  {/* Telnyx Assistant ID — only shown when Telnyx is selected */}
+                  {formData.provider === 'TELNYX' && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                        Telnyx Assistant ID <span className="text-gray-400 font-normal">(optional — overrides default)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.telnyxAssistantId}
+                        onChange={(e) => setFormData({ ...formData, telnyxAssistantId: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                        placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Leave blank to use the default Telnyx assistant. Paste a specific assistant ID to override per-client.</p>
+                    </div>
+                  )}
+
                   {/* Actions */}
                   <div className="flex gap-3 pt-1 border-t border-gray-100">
                     <button
@@ -718,6 +741,14 @@ export default function ClientDetail() {
                       </p>
                     </div>
                   </div>
+
+                  {/* Telnyx assistant */}
+                  {config.provider === 'TELNYX' && config.telnyxAssistantId && (
+                    <div className="bg-green-50 border border-green-100 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Telnyx Assistant</p>
+                      <p className="text-xs font-mono text-green-800 break-all">{config.telnyxAssistantId}</p>
+                    </div>
+                  )}
 
                   {/* Instructions preview */}
                   <div>

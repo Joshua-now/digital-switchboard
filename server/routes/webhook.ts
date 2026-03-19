@@ -121,7 +121,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           lead.id,
           clientId,
           callRecord.id,
-          lead.firstName || undefined
+          lead.firstName || undefined,
+          (routingConfig as any).telnyxAssistantId || undefined
         );
         await prisma.call.update({
           where: { id: callRecord.id },

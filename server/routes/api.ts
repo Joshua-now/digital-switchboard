@@ -169,6 +169,10 @@ router.get('/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
 router.get('/clients', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const scope = agencyScope(req.user!);
+    // Super admin can filter to a specific agency via ?agencyId=
+    if (req.user!.role === 'SUPER_ADMIN' && req.query.agencyId) {
+      scope.agencyId = req.query.agencyId as string;
+    }
     const clients = await prisma.client.findMany({
       where: scope,
       include: {
@@ -327,7 +331,7 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const { active, callWithinSeconds, instructions, questions, transferNumber, provider } = req.body;
+    const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId } = req.body;
     const clientId = req.params.id;
 
     if (!instructions) {
@@ -351,6 +355,7 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
           questions: questions !== undefined ? questions : existingConfig.questions,
           transferNumber: transferNumber !== undefined ? (transferNumber || null) : existingConfig.transferNumber,
           ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
+          ...(telnyxAssistantId !== undefined ? { telnyxAssistantId: telnyxAssistantId || null } : {}),
         },
       });
     } else {
@@ -363,6 +368,7 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
           questions: questions || null,
           transferNumber: transferNumber || null,
           ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
+          ...(telnyxAssistantId ? { telnyxAssistantId } : {}),
         },
       });
     }

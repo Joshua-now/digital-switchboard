@@ -235,9 +235,14 @@ export const api = {
    * Clients API
    */
   clients: {
-    list: (token?: string) => {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      return fetchApi<any[]>("/api/clients", { headers });
+    list: (options?: string | { agencyId?: string }) => {
+      const token = typeof options === 'string' ? options : undefined;
+      const agencyId = typeof options !== 'string' ? options?.agencyId : undefined;
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const query = new URLSearchParams();
+      if (agencyId) query.set('agencyId', agencyId);
+      const qs = query.toString();
+      return fetchApi<any[]>(`/api/clients${qs ? '?' + qs : ''}`, { headers });
     },
     get: (id: string, token?: string) => {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};

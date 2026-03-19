@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import {
   Building2, Users, RefreshCw, CheckCircle, XCircle,
-  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck,
+  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck, ExternalLink,
 } from 'lucide-react';
 
 type AgencyClient = {
@@ -210,6 +210,18 @@ export default function Admin() {
                       )}
                     </div>
 
+                    {/* View agency button */}
+                    <Link
+                      to={`/admin/agencies/${agency.id}`}
+                      state={{ agencyName: agency.name }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors flex-shrink-0"
+                      title={`View ${agency.name}'s clients`}
+                    >
+                      <ExternalLink size={12} />
+                      View
+                    </Link>
+
                     {/* Suspend/Activate button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleStatus(agency); }}
@@ -248,7 +260,11 @@ export default function Admin() {
                           <tbody className="divide-y divide-gray-50">
                             {agency.clients.map((client) => (
                               <tr key={client.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-12 py-3 font-medium text-gray-800">{client.name}</td>
+                                <td className="px-12 py-3">
+                                  <Link to={`/clients/${client.id}`} className="font-medium text-blue-600 hover:text-blue-700">
+                                    {client.name}
+                                  </Link>
+                                </td>
                                 <td className="px-4 py-3 text-gray-600">{client._count.leads}</td>
                                 <td className="px-4 py-3 text-gray-600">{client._count.calls}</td>
                                 <td className="px-4 py-3">

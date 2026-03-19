@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Admin from "./pages/Admin";
+import AdminAgencyView from "./pages/AdminAgencyView";
 import Calls from "./pages/Calls";
 import Clients from "./pages/Clients";
 import ClientDetail from "./pages/ClientDetail";
@@ -53,6 +54,15 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <Admin />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/admin/agencies/:agencyId"
+          element={
+            <RequireAuth>
+              <AdminAgencyView />
             </RequireAuth>
           }
         />
