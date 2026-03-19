@@ -33,17 +33,19 @@ export async function makeTelnyxCall(
   clientId: string,
   internalCallId: string,
   firstName?: string,
-  assistantId?: string
+  assistantId?: string,
+  fromNumber?: string
 ): Promise<{ callId: string; status: string }> {
   if (!TELNYX_API_KEY) throw new Error('TELNYX_API_KEY not set');
 
   const resolvedAssistantId = assistantId || TELNYX_ASSISTANT_ID;
+  const resolvedFromNumber = fromNumber || TELNYX_PHONE_NUMBER;
 
   // Encode IDs in callback URL query params — TeXML callbacks don't support client_state
   const callbackUrl = `${BASE_URL}/webhook/telnyx?leadId=${encodeURIComponent(leadId)}&clientId=${encodeURIComponent(clientId)}&callId=${encodeURIComponent(internalCallId)}`;
 
   const body: Record<string, unknown> = {
-    From: TELNYX_PHONE_NUMBER,
+    From: resolvedFromNumber,
     To: phone,
     AIAssistantId: resolvedAssistantId,
     StatusCallbackUrl: callbackUrl,
