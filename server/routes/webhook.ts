@@ -8,7 +8,6 @@ import { createCall as createVapiCall } from '../providers/vapi.js';
 import {
   makeTelnyxCall,
   decodeTelnyxClientState,
-  startTelnyxAI,
   dialOutbound,
   speakOnCall,
   bridgeCalls,
@@ -469,16 +468,7 @@ router.post('/telnyx', async (req: Request, res: Response) => {
           where: { id: leadId },
           data: { callStatus: 'CALLING' },
         });
-        // Start the AI assistant on the answered outbound call
-        const routingInfo = await prisma.routingConfig.findFirst({
-          where: { clientId },
-        });
-        const assistantId = (routingInfo as any)?.telnyxAssistantId || process.env.TELNYX_ASSISTANT_ID;
-        if (assistantId) {
-          await startTelnyxAI(callControlId, assistantId).catch(e =>
-            console.error('[telnyx-webhook] ai_assist failed:', e.message)
-          );
-        }
+        // AI assistant auto-starts via ai_assistant_id passed at call creation.
         await createAuditLog('telnyx_call_answered', 'Telnyx call answered', clientId, {
           leadId, callControlId,
         });

@@ -40,6 +40,8 @@ export async function makeTelnyxCall(
     JSON.stringify({ leadId, clientId, internalCallId, transferNumber })
   ).toString('base64');
 
+  const resolvedAssistantId = assistantId || TELNYX_ASSISTANT_ID;
+
   const payload: Record<string, unknown> = {
     connection_id: TELNYX_APP_ID,
     to: phone,
@@ -47,9 +49,9 @@ export async function makeTelnyxCall(
     webhook_url: `${BASE_URL}/webhook/telnyx`,
     webhook_url_method: 'POST',
     client_state: clientState,
-    // Do NOT pass ai_assistant_id here — auto-start conflicts with the explicit
-    // ai_assist action we fire in call.answered, causing Anna to be silent.
-    // We start the AI manually after the call is answered (webhook.ts).
+    // Pass ai_assistant_id at call creation so Telnyx auto-starts AI on answer.
+    // There is no separate /actions/ai_assist endpoint — auto-start is the only mechanism.
+    ...(resolvedAssistantId ? { ai_assistant_id: resolvedAssistantId } : {}),
   };
 
   // Pass dynamic variables via custom headers (if assistant supports them)
