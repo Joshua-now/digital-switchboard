@@ -31,6 +31,8 @@ interface RoutingConfig {
   questions: string[] | null;
   transferNumber: string | null;
   telnyxAssistantId: string | null;
+  telnyxPhoneNumber: string | null;
+  telnyxAppId: string | null;
   blandAgentId: string | null;
   vapiAssistantId: string | null;
   updatedAt?: string;
@@ -136,6 +138,8 @@ export default function ClientDetail() {
     callWithinSeconds: 60,
     transferNumber: '',
     telnyxAssistantId: '',
+    telnyxPhoneNumber: '',
+    telnyxAppId: '',
     blandAgentId: '',
     vapiAssistantId: '',
   });
@@ -159,6 +163,8 @@ export default function ClientDetail() {
           callWithinSeconds: configData.callWithinSeconds,
           transferNumber: configData.transferNumber || '',
           telnyxAssistantId: configData.telnyxAssistantId || '',
+          telnyxPhoneNumber: (configData as any).telnyxPhoneNumber || '',
+          telnyxAppId: (configData as any).telnyxAppId || '',
           blandAgentId: configData.blandAgentId || '',
           vapiAssistantId: configData.vapiAssistantId || '',
         });
@@ -203,6 +209,8 @@ export default function ClientDetail() {
         instructions: null,
         transferNumber: formData.transferNumber || null,
         telnyxAssistantId: formData.telnyxAssistantId || null,
+        telnyxPhoneNumber: formData.telnyxPhoneNumber || null,
+        telnyxAppId: formData.telnyxAppId || null,
         blandAgentId: formData.blandAgentId || null,
         vapiAssistantId: formData.vapiAssistantId || null,
       });
@@ -691,19 +699,47 @@ export default function ClientDetail() {
                   )}
 
                   {formData.provider === 'TELNYX' && (
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                        Telnyx Assistant ID
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.telnyxAssistantId}
-                        onChange={(e) => setFormData({ ...formData, telnyxAssistantId: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
-                        placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Create your AI assistant in the Telnyx portal, copy the Assistant ID, paste it here.</p>
-                    </div>
+                    <>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                          Telnyx Assistant ID
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.telnyxAssistantId}
+                          onChange={(e) => setFormData({ ...formData, telnyxAssistantId: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                          placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">Create your AI assistant in the Telnyx portal, copy the Assistant ID, paste it here.</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                          Telnyx Phone Number
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.telnyxPhoneNumber}
+                          onChange={(e) => setFormData({ ...formData, telnyxPhoneNumber: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                          placeholder="+13217324521"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">The Telnyx number this agent dials from (include country code).</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                          Telnyx App ID
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.telnyxAppId}
+                          onChange={(e) => setFormData({ ...formData, telnyxAppId: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                          placeholder="2917724292919592884"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">TeXML Application ID linked to this assistant's phone number.</p>
+                      </div>
+                    </>
                   )}
 
                   {/* Transfer number */}
