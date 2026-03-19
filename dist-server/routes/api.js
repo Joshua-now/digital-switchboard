@@ -140,6 +140,10 @@ router.get('/auth/me', requireAuth, (req, res) => {
 router.get('/clients', requireAuth, async (req, res) => {
     try {
         const scope = agencyScope(req.user);
+        // Super admin can filter to a specific agency via ?agencyId=
+        if (req.user.role === 'SUPER_ADMIN' && req.query.agencyId) {
+            scope.agencyId = req.query.agencyId;
+        }
         const clients = await prisma.client.findMany({
             where: scope,
             include: {
@@ -184,8 +188,8 @@ router.post('/clients', requireAuth, async (req, res) => {
             data: {
                 name: name.trim(),
                 timezone: timezone || 'America/New_York',
-                quietHoursStart: quietHoursStart || '20:00',
-                quietHoursEnd: quietHoursEnd || '08:00',
+                quietHoursStart: quietHoursStart || null,
+                quietHoursEnd: quietHoursEnd || null,
                 status: status || 'ACTIVE',
                 agencyId: req.user.agencyId,
                 ...(ghlLocationId?.trim() ? { ghlLocationId: ghlLocationId.trim() } : {}),
@@ -221,8 +225,8 @@ async function updateClient(req, res) {
             data: {
                 ...(name && { name }),
                 ...(timezone && { timezone }),
-                ...(quietHoursStart && { quietHoursStart }),
-                ...(quietHoursEnd && { quietHoursEnd }),
+                ...('quietHoursStart' in req.body ? { quietHoursStart: quietHoursStart || null } : {}),
+                ...('quietHoursEnd' in req.body ? { quietHoursEnd: quietHoursEnd || null } : {}),
                 ...(status && { status }),
                 ...(ghlLocationId !== undefined ? { ghlLocationId: ghlLocationId || null } : {}),
             },
@@ -291,12 +295,8 @@ async function saveRoutingConfig(req, res) {
             res.status(404).json({ error: 'Client not found' });
             return;
         }
-        const { active, callWithinSeconds, instructions, questions, transferNumber, provider } = req.body;
+        const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, blandAgentId, vapiAssistantId } = req.body;
         const clientId = req.params.id;
-        if (!instructions) {
-            res.status(400).json({ error: 'Instructions are required' });
-            return;
-        }
         const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
         const resolvedProvider = provider && validProviders.includes(provider) ? provider : undefined;
         const existingConfig = await prisma.routingConfig.findFirst({ where: { clientId } });
@@ -307,10 +307,13 @@ async function saveRoutingConfig(req, res) {
                 data: {
                     active: active !== undefined ? active : existingConfig.active,
                     callWithinSeconds: callWithinSeconds || existingConfig.callWithinSeconds,
-                    instructions,
+                    instructions: instructions !== undefined ? (instructions || null) : existingConfig.instructions,
                     questions: questions !== undefined ? questions : existingConfig.questions,
                     transferNumber: transferNumber !== undefined ? (transferNumber || null) : existingConfig.transferNumber,
                     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+                    ...(telnyxAssistantId !== undefined ? { telnyxAssistantId: telnyxAssistantId || null } : {}),
+                    ...(blandAgentId !== undefined ? { blandAgentId: blandAgentId || null } : {}),
+                    ...(vapiAssistantId !== undefined ? { vapiAssistantId: vapiAssistantId || null } : {}),
                 },
             });
         }
@@ -320,10 +323,13 @@ async function saveRoutingConfig(req, res) {
                     clientId,
                     active: active !== undefined ? active : true,
                     callWithinSeconds: callWithinSeconds || 60,
-                    instructions,
+                    instructions: instructions || null,
                     questions: questions || null,
                     transferNumber: transferNumber || null,
                     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+                    ...(telnyxAssistantId ? { telnyxAssistantId } : {}),
+                    ...(blandAgentId ? { blandAgentId } : {}),
+                    ...(vapiAssistantId ? { vapiAssistantId } : {}),
                 },
             });
         }

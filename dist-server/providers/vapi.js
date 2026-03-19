@@ -1,8 +1,9 @@
 import { prisma } from '../lib/db.js';
 import { createAuditLog } from '../lib/audit.js';
-export async function createCall(leadId, clientId, phone, instructions, transferNumber, firstName) {
+export async function createCall(leadId, clientId, phone, instructions, transferNumber, firstName, perClientAssistantId) {
     const apiKey = process.env.VAPI_API_KEY;
-    const assistantId = process.env.VAPI_ASSISTANT_ID;
+    // Per-client assistant ID takes priority over the global env default
+    const assistantId = perClientAssistantId || process.env.VAPI_ASSISTANT_ID;
     const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
     if (!apiKey) {
@@ -28,22 +29,17 @@ export async function createCall(leadId, clientId, phone, instructions, transfer
             assistantId,
             customer: { number: phone },
             ...(phoneNumberId ? { phoneNumberId } : {}),
-            assistantOverrides: {
-                firstMessage: firstName ? `Hello ${firstName}! ` : undefined,
-                model: {
-                    messages: [
-                        {
-                            role: 'system',
-                            content: instructions,
-                        },
-                    ],
+            // Prompt lives in the VAPI assistant itself — no overrides needed
+            ...(transferNumber || firstName ? {
+                assistantOverrides: {
+                    ...(firstName ? { firstMessage: `Hello ${firstName}! ` } : {}),
+                    ...(transferNumber ? {
+                        endCallFunctionEnabled: false,
+                        transferCallMessage: 'Please hold, transferring you now.',
+                        transferDestination: { type: 'phoneNumber', phoneNumber: transferNumber },
+                    } : {}),
                 },
-                ...(transferNumber ? {
-                    endCallFunctionEnabled: false,
-                    transferCallMessage: 'Please hold, transferring you now.',
-                    transferDestination: { type: 'phoneNumber', phoneNumber: transferNumber },
-                } : {}),
-            },
+            } : {}),
             serverUrl: `${baseUrl}/webhook/vapi`,
         };
         const response = await fetch('https://api.vapi.ai/call/phone', {

@@ -4,7 +4,61 @@ import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/ut
 import { createAuditLog } from '../lib/audit.js';
 import { createCall as createBlandCall } from '../providers/bland.js';
 import { createCall as createVapiCall } from '../providers/vapi.js';
-import { makeTelnyxCall, decodeTelnyxClientState } from '../providers/telnyx.js';
+import { makeTelnyxCall, decodeTelnyxClientState, startTelnyxAI, dialOutbound, speakOnCall, bridgeCalls, hangupCall, } from '../providers/telnyx.js';
+const pendingTransfers = new Map();
+async function handleTransferLegEvent(eventType, payload) {
+    const joshuaCcid = payload.call_control_id;
+    const pending = pendingTransfers.get(joshuaCcid);
+    console.log(`[warm-transfer] ${eventType} | joshua:${joshuaCcid} | pending:${!!pending}`);
+    switch (eventType) {
+        case 'call.machine.detection.ended': {
+            const amdResult = payload.result; // 'human' | 'answering_machine' | 'not_sure'
+            console.log(`[warm-transfer] AMD result: ${amdResult}`);
+            if (amdResult === 'answering_machine') {
+                await hangupCall(joshuaCcid).catch(e => console.error('[warm-transfer] hangup failed:', e.message));
+                if (pending) {
+                    clearTimeout(pending.timeout);
+                    pendingTransfers.delete(joshuaCcid);
+                    pending.resolve('unavailable');
+                }
+            }
+            else {
+                // Human (or not_sure) — play whisper
+                if (pending) {
+                    await speakOnCall(joshuaCcid, pending.whisperText).catch(async (e) => {
+                        console.error('[warm-transfer] speak failed, bridging directly:', e.message);
+                        await bridgeCalls(pending.leadCallControlId, joshuaCcid).catch(() => { });
+                        clearTimeout(pending.timeout);
+                        pendingTransfers.delete(joshuaCcid);
+                        pending.resolve('connected');
+                    });
+                }
+            }
+            break;
+        }
+        case 'call.speak.ended': {
+            // Whisper finished — bridge the two legs now
+            if (pending) {
+                await bridgeCalls(pending.leadCallControlId, joshuaCcid).catch(e => console.error('[warm-transfer] bridge failed:', e.message));
+                clearTimeout(pending.timeout);
+                pendingTransfers.delete(joshuaCcid);
+                pending.resolve('connected');
+            }
+            break;
+        }
+        case 'call.hangup': {
+            // Joshua hung up (or never answered) before we bridged
+            if (pending) {
+                clearTimeout(pending.timeout);
+                pendingTransfers.delete(joshuaCcid);
+                pending.resolve('unavailable');
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
 const router = express.Router();
 // ─── GoHighLevel inbound webhook ──────────────────────────────────────────────
 router.post('/gohighlevel/:clientId', async (req, res) => {
@@ -37,7 +91,7 @@ router.post('/gohighlevel/:clientId', async (req, res) => {
             res.status(400).json({ error: 'Invalid phone number' });
             return;
         }
-        const contactId = payload.contactId || payload.contact?.id;
+        const contactId = payload.contactId || payload.contact_id || payload.contact?.id;
         const dedupeKey = generateDedupeKey(contactId, phone);
         const existingLead = await prisma.lead.findUnique({
             where: { clientId_dedupeKey: { clientId, dedupeKey } },
@@ -53,8 +107,8 @@ router.post('/gohighlevel/:clientId', async (req, res) => {
         const lead = await prisma.lead.create({
             data: {
                 clientId,
-                firstName: payload.firstName || payload.contact?.firstName || null,
-                lastName: payload.lastName || payload.contact?.lastName || null,
+                firstName: payload.firstName || payload.first_name || payload.contact?.firstName || null,
+                lastName: payload.lastName || payload.last_name || payload.contact?.lastName || null,
                 phone,
                 email: payload.email || payload.contact?.email || null,
                 source: payload.source || 'gohighlevel',
@@ -85,7 +139,7 @@ router.post('/gohighlevel/:clientId', async (req, res) => {
         const provider = routingConfig.provider || 'BLAND';
         let callResult;
         if (provider === 'VAPI') {
-            callResult = await createVapiCall(lead.id, clientId, phone, routingConfig.instructions, routingConfig.transferNumber || undefined, lead.firstName || undefined);
+            callResult = await createVapiCall(lead.id, clientId, phone, routingConfig.instructions, routingConfig.transferNumber || undefined, lead.firstName || undefined, routingConfig.vapiAssistantId || undefined);
         }
         else if (provider === 'TELNYX') {
             try {
@@ -93,7 +147,7 @@ router.post('/gohighlevel/:clientId', async (req, res) => {
                 const callRecord = await prisma.call.create({
                     data: { clientId, leadId: lead.id, provider: 'TELNYX', status: 'CREATED' },
                 });
-                const result = await makeTelnyxCall(phone, routingConfig.instructions, routingConfig.transferNumber || null, lead.id, clientId, callRecord.id, lead.firstName || undefined);
+                const result = await makeTelnyxCall(phone, routingConfig.instructions, routingConfig.transferNumber || null, lead.id, clientId, callRecord.id, lead.firstName || undefined, routingConfig.telnyxAssistantId || undefined);
                 await prisma.call.update({
                     where: { id: callRecord.id },
                     data: { providerCallId: result.callId, status: 'IN_PROGRESS', startedAt: new Date() },
@@ -112,7 +166,7 @@ router.post('/gohighlevel/:clientId', async (req, res) => {
         }
         else {
             // Default: BLAND
-            callResult = await createBlandCall(lead.id, clientId, phone, routingConfig.instructions, routingConfig.transferNumber || undefined);
+            callResult = await createBlandCall(lead.id, clientId, phone, routingConfig.instructions, routingConfig.transferNumber || undefined, routingConfig.blandAgentId || undefined);
         }
         if (callResult.success) {
             res.status(200).json({ message: 'Lead received and call initiated', leadId: lead.id, callId: callResult.callId });
@@ -230,6 +284,54 @@ router.post('/vapi', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+// ─── Telnyx AI tool: warm transfer with AMD + whisper + fallback ───────────────
+// Anna calls this webhook tool when she wants to transfer a qualified lead.
+// We dial Joshua separately with AMD. If he answers → whisper briefing → bridge.
+// If voicemail → hang up his leg → return "unavailable" so Anna books instead.
+router.post('/telnyx/transfer', async (req, res) => {
+    try {
+        // Telnyx auto-injects call_control_id into webhook tool payloads
+        const leadCcid = req.body.call_control_id;
+        const leadName = req.body.lead_name || 'the lead';
+        const leadSummary = req.body.lead_summary || 'interested in your services';
+        const dest = process.env.DEFAULT_TRANSFER_NUMBER;
+        if (!leadCcid || !dest) {
+            res.status(400).json({ result: 'error', message: 'Missing call_control_id or DEFAULT_TRANSFER_NUMBER' });
+            return;
+        }
+        const whisperText = `Hi Joshua — I have ${leadName} on the line. ${leadSummary}. Connecting you now.`;
+        const webhookUrl = `${process.env.BASE_URL}/webhook/telnyx`;
+        const clientRef = `transfer_from_${leadCcid}`;
+        // Dial Joshua outbound with AMD
+        const joshuaCcid = await dialOutbound(dest, clientRef, webhookUrl);
+        console.log(`[warm-transfer] Dialed Joshua at ${dest} | ccid:${joshuaCcid}`);
+        // Wait up to 25 s for AMD result → whisper → bridge
+        const result = await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                pendingTransfers.delete(joshuaCcid);
+                hangupCall(joshuaCcid).catch(() => { });
+                console.log('[warm-transfer] Timed out — Joshua not reached');
+                resolve('unavailable');
+            }, 25000);
+            pendingTransfers.set(joshuaCcid, {
+                resolve,
+                leadCallControlId: leadCcid,
+                whisperText,
+                timeout,
+            });
+        });
+        if (result === 'connected') {
+            res.json({ result: 'connected', message: `${leadName} has been connected with Joshua.` });
+        }
+        else {
+            res.json({ result: 'unavailable', message: 'Joshua is not available right now.' });
+        }
+    }
+    catch (err) {
+        console.error('[telnyx-transfer]', err.response?.data || err.message);
+        res.status(500).json({ result: 'error', message: err.message });
+    }
+});
 // ─── Telnyx callback ───────────────────────────────────────────────────────────
 // Telnyx expects a fast 200. Always respond first, then process async.
 router.post('/telnyx', async (req, res) => {
@@ -240,6 +342,12 @@ router.post('/telnyx', async (req, res) => {
             return;
         const eventType = event.event_type;
         const payload = event.payload ?? {};
+        // ── Warm-transfer leg events (Joshua's outbound call — no client_state) ──
+        const clientRef = payload.client_reference_id || '';
+        if (clientRef.startsWith('transfer_from_')) {
+            await handleTransferLegEvent(eventType, payload);
+            return;
+        }
         const clientState = payload.client_state
             ? decodeTelnyxClientState(payload.client_state)
             : null;
@@ -260,7 +368,7 @@ router.post('/telnyx', async (req, res) => {
                     leadId, callControlId,
                 });
                 break;
-            case 'call.answered':
+            case 'call.answered': {
                 await prisma.call.updateMany({
                     where: { id: internalCallId },
                     data: { status: 'IN_PROGRESS', providerCallId: callControlId },
@@ -269,10 +377,19 @@ router.post('/telnyx', async (req, res) => {
                     where: { id: leadId },
                     data: { callStatus: 'CALLING' },
                 });
+                // Start the AI assistant on the answered outbound call
+                const routingInfo = await prisma.routingConfig.findFirst({
+                    where: { clientId },
+                });
+                const assistantId = routingInfo?.telnyxAssistantId || process.env.TELNYX_ASSISTANT_ID;
+                if (assistantId) {
+                    await startTelnyxAI(callControlId, assistantId).catch(e => console.error('[telnyx-webhook] ai_assist failed:', e.message));
+                }
                 await createAuditLog('telnyx_call_answered', 'Telnyx call answered', clientId, {
                     leadId, callControlId,
                 });
                 break;
+            }
             case 'call.hangup': {
                 const hangupCause = payload.hangup_cause;
                 const callDuration = payload.call_duration_secs;

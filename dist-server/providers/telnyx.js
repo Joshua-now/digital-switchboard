@@ -21,7 +21,7 @@ const api = axios.create({
  *
  * client_state carries metadata back through webhook events.
  */
-export async function makeTelnyxCall(phone, instructions, transferNumber, leadId, clientId, internalCallId, firstName) {
+export async function makeTelnyxCall(phone, instructions, transferNumber, leadId, clientId, internalCallId, firstName, assistantId) {
     if (!TELNYX_API_KEY)
         throw new Error('TELNYX_API_KEY not set');
     const clientState = Buffer.from(JSON.stringify({ leadId, clientId, internalCallId, transferNumber })).toString('base64');
@@ -32,7 +32,9 @@ export async function makeTelnyxCall(phone, instructions, transferNumber, leadId
         webhook_url: `${BASE_URL}/webhook/telnyx`,
         webhook_url_method: 'POST',
         client_state: clientState,
-        ai_assistant_id: TELNYX_ASSISTANT_ID,
+        // Do NOT pass ai_assistant_id here — auto-start conflicts with the explicit
+        // ai_assist action we fire in call.answered, causing Anna to be silent.
+        // We start the AI manually after the call is answered (webhook.ts).
     };
     // Pass dynamic variables via custom headers (if assistant supports them)
     if (firstName) {
@@ -46,6 +48,50 @@ export async function makeTelnyxCall(phone, instructions, transferNumber, leadId
         throw new Error('No call_control_id in Telnyx response');
     }
     return { callId: callControlId, status: 'CREATED' };
+}
+/**
+ * Start the AI assistant on an answered outbound call.
+ * Must be called after the call.answered webhook event.
+ */
+export async function startTelnyxAI(callControlId, assistantId) {
+    await api.post(`/calls/${callControlId}/actions/ai_assist`, {
+        ai_assistant_id: assistantId,
+    });
+}
+/** Dial an outbound call leg for warm transfer AMD flow (no AI — just a regular call) */
+export async function dialOutbound(to, clientReferenceId, webhookUrl) {
+    const response = await api.post('/calls', {
+        connection_id: TELNYX_APP_ID,
+        to,
+        from: TELNYX_PHONE_NUMBER,
+        answering_machine_detection: 'premium',
+        client_reference_id: clientReferenceId,
+        webhook_url: webhookUrl,
+        webhook_url_method: 'POST',
+    });
+    const ccid = response.data?.data?.call_control_id;
+    if (!ccid)
+        throw new Error('No call_control_id from outbound dial');
+    return ccid;
+}
+/** Play TTS on an active call leg (used for whisper to contractor) */
+export async function speakOnCall(callControlId, text) {
+    await api.post(`/calls/${callControlId}/actions/speak`, {
+        payload: text,
+        payload_type: 'text',
+        voice: 'female',
+        language: 'en-US',
+    });
+}
+/** Bridge two call legs together (warm transfer completion) */
+export async function bridgeCalls(callControlId, otherCallControlId) {
+    await api.post(`/calls/${callControlId}/actions/bridge`, {
+        call_control_id: otherCallControlId,
+    });
+}
+/** Hang up a call leg */
+export async function hangupCall(callControlId) {
+    await api.post(`/calls/${callControlId}/actions/hangup`, {});
 }
 /**
  * Decode client_state from base64 (called in webhook handler).

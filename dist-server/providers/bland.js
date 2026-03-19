@@ -11,7 +11,7 @@ function normalizeBaseUrl(raw) {
         return null;
     return trimmed;
 }
-export async function createCall(leadId, clientId, phone, instructions, transferNumber) {
+export async function createCall(leadId, clientId, phone, instructions, transferNumber, agentId) {
     const apiKey = (process.env.BLAND_API_KEY || '').trim();
     const baseUrl = normalizeBaseUrl(process.env.BASE_URL);
     if (!apiKey) {
@@ -45,16 +45,15 @@ export async function createCall(leadId, clientId, phone, instructions, transfer
         });
         const payload = {
             phone_number: phone,
-            task: instructions,
-            // Force the correct agent behavior
-            persona_id: personaId,
-            voice,
+            // Use agent's own prompt if agentId is set, otherwise fall back to task
+            ...(agentId ? {} : { task: instructions || '' }),
+            // Force the correct agent behavior (env-level defaults, overridden by agentId)
+            persona_id: agentId ? undefined : personaId,
+            voice: agentId ? undefined : voice,
             webhook: webhookUrl,
-            // Only send events you care about (safe defaults)
             webhook_events: ['completed', 'failed'],
             wait_for_greeting: true,
             record: true,
-            // Helps you debug + correlate in webhooks without guessing
             metadata: {
                 leadId,
                 clientId,
@@ -67,14 +66,18 @@ export async function createCall(leadId, clientId, phone, instructions, transfer
         };
         if (transferNumber)
             payload.transfer_phone_number = transferNumber;
+        // Use Bland Agents API if agentId provided, otherwise use v1/calls
+        const callUrl = agentId
+            ? `https://api.bland.ai/v1/agents/${agentId}/call`
+            : 'https://api.bland.ai/v1/calls';
         console.log('[BLAND] sending call', {
             phone,
             webhookUrl,
+            agentId: agentId || 'none (task mode)',
             persona_id: payload.persona_id,
-            voice: payload.voice,
             hasTransfer: !!transferNumber,
         });
-        const response = await fetch('https://api.bland.ai/v1/calls', {
+        const response = await fetch(callUrl, {
             method: 'POST',
             headers: {
                 // Bland docs show `authorization` header. :contentReference[oaicite:1]{index=1}

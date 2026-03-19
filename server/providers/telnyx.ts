@@ -47,7 +47,9 @@ export async function makeTelnyxCall(
     webhook_url: `${BASE_URL}/webhook/telnyx`,
     webhook_url_method: 'POST',
     client_state: clientState,
-    ai_assistant_id: assistantId || TELNYX_ASSISTANT_ID,
+    // Do NOT pass ai_assistant_id here — auto-start conflicts with the explicit
+    // ai_assist action we fire in call.answered, causing Anna to be silent.
+    // We start the AI manually after the call is answered (webhook.ts).
   };
 
   // Pass dynamic variables via custom headers (if assistant supports them)
