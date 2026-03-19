@@ -33,10 +33,6 @@ export default function Admin() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
-  if (user && user.role !== 'SUPER_ADMIN') {
-    return <Navigate to="/clients" replace />;
-  }
-
   const loadAgencies = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -53,6 +49,10 @@ export default function Admin() {
   useEffect(() => {
     loadAgencies();
   }, [loadAgencies]);
+
+  if (user && user.role !== 'SUPER_ADMIN') {
+    return <Navigate to="/clients" replace />;
+  }
 
   const toggleStatus = async (agency: Agency) => {
     const newStatus = agency.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
