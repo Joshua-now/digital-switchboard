@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import {
   Building2, Users, RefreshCw, CheckCircle, XCircle,
-  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck, ExternalLink,
+  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck, ExternalLink, Search,
 } from 'lucide-react';
 
 type AgencyClient = {
@@ -31,6 +31,7 @@ export default function Admin() {
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
 
   if (user && user.role !== 'SUPER_ADMIN') {
     return <Navigate to="/clients" replace />;
@@ -76,6 +77,13 @@ export default function Admin() {
     });
   };
 
+  const filteredAgencies = search.trim()
+    ? agencies.filter((a) =>
+        a.name.toLowerCase().includes(search.toLowerCase()) ||
+        a.clients.some((c) => c.name.toLowerCase().includes(search.toLowerCase()))
+      )
+    : agencies;
+
   const totalClients = agencies.reduce((s, a) => s + a._count.clients, 0);
   const totalLeads = agencies.reduce(
     (s, a) => s + a.clients.reduce((cs, c) => cs + c._count.leads, 0), 0
@@ -95,14 +103,27 @@ export default function Admin() {
             <h1 className="text-xl font-semibold text-gray-900">Agency Management</h1>
             <p className="text-sm text-gray-500 mt-0.5">Super admin — all agencies across Switchboard</p>
           </div>
-          <button
-            onClick={loadAgencies}
-            disabled={loading}
-            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Search */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search agencies or clients…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
+              />
+            </div>
+            <button
+              onClick={loadAgencies}
+              disabled={loading}
+              className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
@@ -145,9 +166,13 @@ export default function Admin() {
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
             No agencies yet. Contractors sign up at /signup.
           </div>
+        ) : filteredAgencies.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+            No agencies match "{search}".
+          </div>
         ) : (
           <div className="space-y-3">
-            {agencies.map((agency) => {
+            {filteredAgencies.map((agency) => {
               const isOpen = expanded.has(agency.id);
               const agencyLeads = agency.clients.reduce((s, c) => s + c._count.leads, 0);
               const agencyCalls = agency.clients.reduce((s, c) => s + c._count.calls, 0);

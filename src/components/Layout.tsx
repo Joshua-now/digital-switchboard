@@ -1,7 +1,7 @@
 import { ReactNode, useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Phone, Users, Database, LogOut } from 'lucide-react';
+import { Phone, Users, Database, LogOut, ShieldCheck } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -49,6 +49,9 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Clients', href: '/clients', icon: Users },
     { name: 'Leads',   href: '/leads',   icon: Database },
     { name: 'Calls',   href: '/calls',   icon: Phone },
+    ...(user?.role === 'SUPER_ADMIN'
+      ? [{ name: 'Admin', href: '/admin', icon: ShieldCheck }]
+      : []),
   ];
 
   const isActive = (href: string) => location.pathname.startsWith(href);
@@ -105,7 +108,7 @@ export default function Layout({ children }: LayoutProps) {
 
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-medium text-gray-900 leading-tight">{user?.email}</p>
-                <p className="text-xs text-gray-400">Admin</p>
+                <p className="text-xs text-gray-400">{user?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}</p>
               </div>
 
               <button
