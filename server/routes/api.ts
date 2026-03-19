@@ -331,13 +331,8 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId } = req.body;
+    const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, blandAgentId, vapiAssistantId } = req.body;
     const clientId = req.params.id;
-
-    if (!instructions) {
-      res.status(400).json({ error: 'Instructions are required' });
-      return;
-    }
 
     const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
     const resolvedProvider = provider && validProviders.includes(provider) ? provider : undefined;
@@ -351,11 +346,13 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
         data: {
           active: active !== undefined ? active : existingConfig.active,
           callWithinSeconds: callWithinSeconds || existingConfig.callWithinSeconds,
-          instructions,
+          instructions: instructions !== undefined ? (instructions || null) : existingConfig.instructions,
           questions: questions !== undefined ? questions : existingConfig.questions,
           transferNumber: transferNumber !== undefined ? (transferNumber || null) : existingConfig.transferNumber,
           ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
           ...(telnyxAssistantId !== undefined ? { telnyxAssistantId: telnyxAssistantId || null } : {}),
+          ...(blandAgentId !== undefined ? { blandAgentId: blandAgentId || null } : {}),
+          ...(vapiAssistantId !== undefined ? { vapiAssistantId: vapiAssistantId || null } : {}),
         },
       });
     } else {
@@ -364,11 +361,13 @@ async function saveRoutingConfig(req: AuthRequest, res: Response): Promise<void>
           clientId,
           active: active !== undefined ? active : true,
           callWithinSeconds: callWithinSeconds || 60,
-          instructions,
+          instructions: instructions || null,
           questions: questions || null,
           transferNumber: transferNumber || null,
           ...(resolvedProvider ? { provider: resolvedProvider as any } : {}),
           ...(telnyxAssistantId ? { telnyxAssistantId } : {}),
+          ...(blandAgentId ? { blandAgentId } : {}),
+          ...(vapiAssistantId ? { vapiAssistantId } : {}),
         },
       });
     }
