@@ -68,6 +68,19 @@ export async function makeTelnyxCall(
 }
 
 /**
+ * Start the AI assistant on an answered outbound call.
+ * Must be called after the call.answered webhook event.
+ */
+export async function startTelnyxAI(
+  callControlId: string,
+  assistantId: string
+): Promise<void> {
+  await api.post(`/calls/${callControlId}/actions/ai_assist`, {
+    ai_assistant_id: assistantId,
+  });
+}
+
+/**
  * Decode client_state from base64 (called in webhook handler).
  */
 export function decodeTelnyxClientState(b64: string): {

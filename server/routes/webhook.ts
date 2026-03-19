@@ -4,7 +4,7 @@ import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/ut
 import { createAuditLog } from '../lib/audit.js';
 import { createCall as createBlandCall } from '../providers/bland.js';
 import { createCall as createVapiCall } from '../providers/vapi.js';
-import { makeTelnyxCall, decodeTelnyxClientState } from '../providers/telnyx.js';
+import { makeTelnyxCall, decodeTelnyxClientState, startTelnyxAI } from '../providers/telnyx.js';
 
 const router = express.Router();
 
@@ -316,7 +316,7 @@ router.post('/telnyx', async (req: Request, res: Response) => {
         });
         break;
 
-      case 'call.answered':
+      case 'call.answered': {
         await prisma.call.updateMany({
           where: { id: internalCallId },
           data: { status: 'IN_PROGRESS', providerCallId: callControlId },
@@ -325,10 +325,21 @@ router.post('/telnyx', async (req: Request, res: Response) => {
           where: { id: leadId },
           data: { callStatus: 'CALLING' },
         });
+        // Start the AI assistant on the answered outbound call
+        const routingInfo = await prisma.routingConfig.findFirst({
+          where: { clientId },
+        });
+        const assistantId = (routingInfo as any)?.telnyxAssistantId || process.env.TELNYX_ASSISTANT_ID;
+        if (assistantId) {
+          await startTelnyxAI(callControlId, assistantId).catch(e =>
+            console.error('[telnyx-webhook] ai_assist failed:', e.message)
+          );
+        }
         await createAuditLog('telnyx_call_answered', 'Telnyx call answered', clientId, {
           leadId, callControlId,
         });
         break;
+      }
 
       case 'call.hangup': {
         const hangupCause = payload.hangup_cause as string | undefined;
