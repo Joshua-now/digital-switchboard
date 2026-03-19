@@ -42,22 +42,37 @@ export async function makeTelnyxCall(
   // Encode IDs in callback URL query params — TeXML callbacks don't support client_state
   const callbackUrl = `${BASE_URL}/webhook/telnyx?leadId=${encodeURIComponent(leadId)}&clientId=${encodeURIComponent(clientId)}&callId=${encodeURIComponent(internalCallId)}`;
 
-  const response = await api.post(`/texml/ai_calls/${TELNYX_APP_ID}`, {
+  const body: Record<string, unknown> = {
     From: TELNYX_PHONE_NUMBER,
     To: phone,
     AIAssistantId: resolvedAssistantId,
     StatusCallbackUrl: callbackUrl,
     StatusCallbackMethod: 'POST',
-  });
+  };
+
+  // Pass dynamic variables so {{firstName}} etc. resolve in the system prompt
+  if (firstName) {
+    body.Variables = { firstName, first_name: firstName };
+  }
+
+  const response = await api.post(`/texml/ai_calls/${TELNYX_APP_ID}`, body);
+
+  // Log full response shape once so we can confirm the ID field name
+  console.log('[telnyx-texml] response keys:', Object.keys(response.data || {}));
+  console.log('[telnyx-texml] response data:', JSON.stringify(response.data).substring(0, 300));
 
   // TeXML response uses CallSid; fall back to call_control_id if present
   const callId =
     (response.data?.CallSid as string) ||
     (response.data?.data?.CallSid as string) ||
-    (response.data?.data?.call_control_id as string);
+    (response.data?.data?.call_control_id as string) ||
+    (response.data?.id as string) ||
+    (response.data?.call_session_id as string);
 
   if (!callId) {
-    throw new Error('No call ID in Telnyx TeXML AI response');
+    // Call was placed — just can't track it. Return a placeholder rather than failing.
+    console.warn('[telnyx-texml] Could not parse call ID from response — call may still be in progress');
+    return { callId: 'unknown', status: 'CREATED' };
   }
 
   return { callId, status: 'CREATED' };
