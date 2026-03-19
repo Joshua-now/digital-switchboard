@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import axios from 'axios';
 import { prisma } from '../lib/db.js';
 import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/utils.js';
 import { createAuditLog } from '../lib/audit.js';
@@ -277,6 +278,28 @@ router.post('/vapi', async (req: Request, res: Response) => {
     console.error('VAPI webhook error:', error);
     await createAuditLog('WEBHOOK_ERROR', error.message, undefined, { payload, error: error.message });
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Telnyx AI tool: transfer call ─────────────────────────────────────────────
+// Called by the AI assistant's webhook tool when it wants to transfer the call
+router.post('/telnyx/transfer', async (req: Request, res: Response) => {
+  try {
+    const { call_control_id, to } = req.body as { call_control_id?: string; to?: string };
+    const dest = to || process.env.DEFAULT_TRANSFER_NUMBER;
+    if (!call_control_id || !dest) {
+      res.status(400).json({ result: 'error', message: 'Missing call_control_id or destination' });
+      return;
+    }
+    await axios.post(
+      `https://api.telnyx.com/v2/calls/${call_control_id}/actions/transfer`,
+      { to: dest },
+      { headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+    );
+    res.json({ result: 'transferring', to: dest });
+  } catch (err: any) {
+    console.error('[telnyx-transfer]', err.response?.data || err.message);
+    res.status(500).json({ result: 'error', message: err.message });
   }
 });
 
