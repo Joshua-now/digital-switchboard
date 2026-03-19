@@ -69,9 +69,12 @@ model RoutingConfig {
   provider          CallProvider  @default(BLAND)
   active            Boolean       @default(true)
   callWithinSeconds Int           @default(60) @map("call_within_seconds")
-  instructions      String        @db.Text
+  instructions      String?       @db.Text
   questions         Json?
   transferNumber    String?       @map("transfer_number")
+  telnyxAssistantId String?       @map("telnyx_assistant_id")
+  blandAgentId      String?       @map("bland_agent_id")
+  vapiAssistantId   String?       @map("vapi_assistant_id")
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 

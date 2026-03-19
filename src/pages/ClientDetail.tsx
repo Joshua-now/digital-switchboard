@@ -27,10 +27,12 @@ interface RoutingConfig {
   provider: CallProvider;
   active: boolean;
   callWithinSeconds: number;
-  instructions: string;
+  instructions?: string | null;
   questions: string[] | null;
   transferNumber: string | null;
   telnyxAssistantId: string | null;
+  blandAgentId: string | null;
+  vapiAssistantId: string | null;
   updatedAt?: string;
 }
 
@@ -132,9 +134,10 @@ export default function ClientDetail() {
     provider: 'BLAND' as CallProvider,
     active: true,
     callWithinSeconds: 60,
-    instructions: '',
     transferNumber: '',
     telnyxAssistantId: '',
+    blandAgentId: '',
+    vapiAssistantId: '',
   });
 
   const loadData = useCallback(async () => {
@@ -154,9 +157,10 @@ export default function ClientDetail() {
           provider: configData.provider || 'BLAND',
           active: configData.active,
           callWithinSeconds: configData.callWithinSeconds,
-          instructions: configData.instructions,
           transferNumber: configData.transferNumber || '',
           telnyxAssistantId: configData.telnyxAssistantId || '',
+          blandAgentId: configData.blandAgentId || '',
+          vapiAssistantId: configData.vapiAssistantId || '',
         });
         setEditMode(false);
       } else {
@@ -192,16 +196,15 @@ export default function ClientDetail() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id) return;
-    if (!formData.instructions.trim()) {
-      setToast({ message: 'Instructions are required', type: 'error' });
-      return;
-    }
     setSaving(true);
     try {
       await api.clients.saveRoutingConfig(id, {
         ...formData,
+        instructions: null,
         transferNumber: formData.transferNumber || null,
         telnyxAssistantId: formData.telnyxAssistantId || null,
+        blandAgentId: formData.blandAgentId || null,
+        vapiAssistantId: formData.vapiAssistantId || null,
       });
       setToast({ message: 'Configuration saved!', type: 'success' });
       await loadData();
@@ -222,9 +225,11 @@ export default function ClientDetail() {
         provider: newProvider,
         active: config.active,
         callWithinSeconds: config.callWithinSeconds,
-        instructions: config.instructions,
+        instructions: null,
         transferNumber: config.transferNumber,
         telnyxAssistantId: config.telnyxAssistantId,
+        blandAgentId: config.blandAgentId,
+        vapiAssistantId: config.vapiAssistantId,
       });
       setToast({ message: `Switched to ${PROVIDER_META[newProvider].label}`, type: 'success' });
       await loadData();
@@ -255,8 +260,11 @@ export default function ClientDetail() {
     try {
       await api.clients.saveRoutingConfig(id, {
         ...config,
+        instructions: null,
         active: !config.active,
         transferNumber: config.transferNumber,
+        blandAgentId: config.blandAgentId,
+        vapiAssistantId: config.vapiAssistantId,
       });
       setToast({ message: config.active ? 'Calling paused' : 'Calling activated', type: 'success' });
       await loadData();
@@ -587,9 +595,10 @@ export default function ClientDetail() {
                           provider: config.provider || 'BLAND',
                           active: config.active,
                           callWithinSeconds: config.callWithinSeconds,
-                          instructions: config.instructions,
                           transferNumber: config.transferNumber || '',
                           telnyxAssistantId: config.telnyxAssistantId || '',
+                          blandAgentId: config.blandAgentId || '',
+                          vapiAssistantId: config.vapiAssistantId || '',
                         });
                       }}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium"
@@ -646,21 +655,54 @@ export default function ClientDetail() {
                     </div>
                   </div>
 
-                  {/* Instructions */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      AI Agent Instructions
-                    </label>
-                    <p className="text-xs text-gray-500 mb-2">What should the AI say and do on the call? Be specific about the business, the goal, and how to handle objections.</p>
-                    <textarea
-                      value={formData.instructions}
-                      onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent h-48 font-mono text-sm resize-y"
-                      placeholder={`You are Anna, an AI assistant calling on behalf of [Company Name].\n\nYour goal is to confirm the lead's interest and schedule a follow-up with a human agent.\n\nKey points:\n- Be warm and professional\n- Ask qualifying questions\n- If interested, offer to transfer to [Name] at [Company]`}
-                      required
-                    />
-                    <p className="text-xs text-gray-400 mt-1 text-right">{formData.instructions.length} chars</p>
-                  </div>
+                  {/* Per-provider Agent ID */}
+                  {formData.provider === 'BLAND' && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                        Bland Agent ID
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.blandAgentId}
+                        onChange={(e) => setFormData({ ...formData, blandAgentId: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Create your agent in Bland AI, copy the Agent ID, paste it here. All prompt/voice settings stay in Bland.</p>
+                    </div>
+                  )}
+
+                  {formData.provider === 'VAPI' && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                        VAPI Assistant ID
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.vapiAssistantId}
+                        onChange={(e) => setFormData({ ...formData, vapiAssistantId: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Create your assistant in VAPI, copy the Assistant ID, paste it here. Leave blank to use the account default.</p>
+                    </div>
+                  )}
+
+                  {formData.provider === 'TELNYX' && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                        Telnyx Assistant ID
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.telnyxAssistantId}
+                        onChange={(e) => setFormData({ ...formData, telnyxAssistantId: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
+                        placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Create your AI assistant in the Telnyx portal, copy the Assistant ID, paste it here.</p>
+                    </div>
+                  )}
 
                   {/* Transfer number */}
                   <div>
@@ -674,25 +716,8 @@ export default function ClientDetail() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                       placeholder="+14075551234"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Include country code. The AI will transfer hot leads to this number.</p>
+                    <p className="text-xs text-gray-400 mt-1">Include country code. The AI will transfer hot leads to this number during business hours.</p>
                   </div>
-
-                  {/* Telnyx Assistant ID — only shown when Telnyx is selected */}
-                  {formData.provider === 'TELNYX' && (
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                        Telnyx Assistant ID <span className="text-gray-400 font-normal">(optional — overrides default)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.telnyxAssistantId}
-                        onChange={(e) => setFormData({ ...formData, telnyxAssistantId: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm font-mono"
-                        placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Leave blank to use the default Telnyx assistant. Paste a specific assistant ID to override per-client.</p>
-                    </div>
-                  )}
 
                   {/* Actions */}
                   <div className="flex gap-3 pt-1 border-t border-gray-100">
@@ -742,29 +767,31 @@ export default function ClientDetail() {
                     </div>
                   </div>
 
-                  {/* Telnyx assistant */}
-                  {config.provider === 'TELNYX' && config.telnyxAssistantId && (
-                    <div className="bg-green-50 border border-green-100 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Telnyx Assistant</p>
-                      <p className="text-xs font-mono text-green-800 break-all">{config.telnyxAssistantId}</p>
+                  {/* Agent ID display */}
+                  {config.provider === 'TELNYX' && (
+                    <div className={`rounded-lg p-3 border ${config.telnyxAssistantId ? 'bg-green-50 border-green-100' : 'bg-amber-50 border-amber-100'}`}>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Telnyx Assistant ID</p>
+                      {config.telnyxAssistantId
+                        ? <p className="text-xs font-mono text-green-800 break-all">{config.telnyxAssistantId}</p>
+                        : <p className="text-xs text-amber-600">Not set — edit to add assistant ID</p>}
                     </div>
                   )}
-
-                  {/* Instructions preview */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Agent Instructions</p>
-                      <button
-                        onClick={() => setEditMode(true)}
-                        className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                      >
-                        <Pencil className="w-3 h-3" />Edit
-                      </button>
+                  {config.provider === 'BLAND' && (
+                    <div className={`rounded-lg p-3 border ${config.blandAgentId ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Bland Agent ID</p>
+                      {config.blandAgentId
+                        ? <p className="text-xs font-mono text-purple-800 break-all">{config.blandAgentId}</p>
+                        : <p className="text-xs text-amber-600">Not set — edit to add agent ID</p>}
                     </div>
-                    <div className="bg-gray-50 border border-gray-100 rounded-lg p-4 max-h-48 overflow-y-auto">
-                      <pre className="text-gray-700 text-xs font-mono whitespace-pre-wrap leading-relaxed">{config.instructions}</pre>
+                  )}
+                  {config.provider === 'VAPI' && (
+                    <div className={`rounded-lg p-3 border ${config.vapiAssistantId ? 'bg-blue-50 border-blue-100' : 'bg-amber-50 border-amber-100'}`}>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">VAPI Assistant ID</p>
+                      {config.vapiAssistantId
+                        ? <p className="text-xs font-mono text-blue-800 break-all">{config.vapiAssistantId}</p>
+                        : <p className="text-xs text-amber-600">Not set — using account default from env</p>}
                     </div>
-                  </div>
+                  )}
 
                   {config.updatedAt && (
                     <p className="text-xs text-gray-400 flex items-center gap-1">
@@ -784,7 +811,7 @@ export default function ClientDetail() {
                   <div>
                     <p className="text-sm font-semibold text-amber-800">Routing not configured</p>
                     <p className="text-xs text-amber-700 mt-1">
-                      This client won't place any calls until you configure a provider and agent instructions above.
+                      This client won't place any calls until you select a provider and enter the Agent/Assistant ID.
                     </p>
                     <button
                       onClick={() => setEditMode(true)}

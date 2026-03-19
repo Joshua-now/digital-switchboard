@@ -5,12 +5,14 @@ export async function createCall(
   leadId: string,
   clientId: string,
   phone: string,
-  instructions: string,
+  instructions: string | null | undefined,
   transferNumber?: string,
-  firstName?: string
+  firstName?: string,
+  perClientAssistantId?: string
 ): Promise<{ success: boolean; callId?: string; error?: string }> {
   const apiKey = process.env.VAPI_API_KEY;
-  const assistantId = process.env.VAPI_ASSISTANT_ID;
+  // Per-client assistant ID takes priority over the global env default
+  const assistantId = perClientAssistantId || process.env.VAPI_ASSISTANT_ID;
   const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
   const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
 
@@ -40,22 +42,17 @@ export async function createCall(
       assistantId,
       customer: { number: phone },
       ...(phoneNumberId ? { phoneNumberId } : {}),
-      assistantOverrides: {
-        firstMessage: firstName ? `Hello ${firstName}! ` : undefined,
-        model: {
-          messages: [
-            {
-              role: 'system',
-              content: instructions,
-            },
-          ],
+      // Prompt lives in the VAPI assistant itself — no overrides needed
+      ...(transferNumber || firstName ? {
+        assistantOverrides: {
+          ...(firstName ? { firstMessage: `Hello ${firstName}! ` } : {}),
+          ...(transferNumber ? {
+            endCallFunctionEnabled: false,
+            transferCallMessage: 'Please hold, transferring you now.',
+            transferDestination: { type: 'phoneNumber', phoneNumber: transferNumber },
+          } : {}),
         },
-        ...(transferNumber ? {
-          endCallFunctionEnabled: false,
-          transferCallMessage: 'Please hold, transferring you now.',
-          transferDestination: { type: 'phoneNumber', phoneNumber: transferNumber },
-        } : {}),
-      },
+      } : {}),
       serverUrl: `${baseUrl}/webhook/vapi`,
     };
 

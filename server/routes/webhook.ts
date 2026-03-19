@@ -106,7 +106,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
         lead.id, clientId, phone,
         routingConfig.instructions,
         routingConfig.transferNumber || undefined,
-        lead.firstName || undefined
+        lead.firstName || undefined,
+        (routingConfig as any).vapiAssistantId || undefined
       );
     } else if (provider === 'TELNYX') {
       try {
@@ -143,7 +144,8 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
       callResult = await createBlandCall(
         lead.id, clientId, phone,
         routingConfig.instructions,
-        routingConfig.transferNumber || undefined
+        routingConfig.transferNumber || undefined,
+        (routingConfig as any).blandAgentId || undefined
       );
     }
 
