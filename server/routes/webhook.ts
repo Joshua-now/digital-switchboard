@@ -86,6 +86,25 @@ async function handleTransferLegEvent(
   }
 }
 
+// ─── Telnyx config fallbacks (used until DB fields are set via UI) ────────────
+const TELNYX_CLIENT_CONFIG: Record<string, { phone: string; appId: string; assistantId: string }> = {
+  '8193d202-e65b-4b1b-9add-332f09e219b9': { // Speed to Lead
+    phone: '+13217324521',
+    appId: '2917724292919592884',
+    assistantId: 'assistant-76aa79cf-b607-4642-89d9-ce8142d7d21d',
+  },
+  '26507fe6-ac87-41e7-b1db-edfb27ebe1d2': { // Complete Package
+    phone: '+13217325443',
+    appId: '2919319730848269936',
+    assistantId: 'assistant-7b0b4f79-acf6-4d86-a642-cf80be82b472',
+  },
+  '8573c54b-c173-4356-8d9d-68afde288d8f': { // After Hours
+    phone: '+13217325253',
+    appId: '2919319820849645212',
+    assistantId: 'assistant-5b358ddc-9166-4f69-b6ea-ac75a0df4fee',
+  },
+};
+
 const router = express.Router();
 
 // ─── GoHighLevel inbound webhook ──────────────────────────────────────────────
@@ -203,9 +222,9 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
           clientId,
           callRecord.id,
           lead.firstName || undefined,
-          (routingConfig as any).telnyxAssistantId || undefined,
-          (routingConfig as any).telnyxPhoneNumber || undefined,
-          (routingConfig as any).telnyxAppId || undefined
+          (routingConfig as any).telnyxAssistantId || TELNYX_CLIENT_CONFIG[clientId]?.assistantId,
+          (routingConfig as any).telnyxPhoneNumber || TELNYX_CLIENT_CONFIG[clientId]?.phone,
+          (routingConfig as any).telnyxAppId || TELNYX_CLIENT_CONFIG[clientId]?.appId
         );
         await prisma.call.update({
           where: { id: callRecord.id },
