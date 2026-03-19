@@ -34,12 +34,14 @@ export async function makeTelnyxCall(
   internalCallId: string,
   firstName?: string,
   assistantId?: string,
-  fromNumber?: string
+  fromNumber?: string,
+  appId?: string
 ): Promise<{ callId: string; status: string }> {
   if (!TELNYX_API_KEY) throw new Error('TELNYX_API_KEY not set');
 
   const resolvedAssistantId = assistantId || TELNYX_ASSISTANT_ID;
   const resolvedFromNumber = fromNumber || TELNYX_PHONE_NUMBER;
+  const resolvedAppId = appId || TELNYX_APP_ID;
 
   // Encode IDs in callback URL query params — TeXML callbacks don't support client_state
   const callbackUrl = `${BASE_URL}/webhook/telnyx?leadId=${encodeURIComponent(leadId)}&clientId=${encodeURIComponent(clientId)}&callId=${encodeURIComponent(internalCallId)}`;
@@ -52,12 +54,12 @@ export async function makeTelnyxCall(
     StatusCallbackMethod: 'POST',
   };
 
-  // Pass dynamic variables so {{firstName}} etc. resolve in the system prompt
+  // Pass firstName so {{firstName}} resolves in the system prompt
   if (firstName) {
-    body.Variables = { firstName, first_name: firstName };
+    body.Variables = JSON.stringify({ firstName, first_name: firstName });
   }
 
-  const response = await api.post(`/texml/ai_calls/${TELNYX_APP_ID}`, body);
+  const response = await api.post(`/texml/ai_calls/${resolvedAppId}`, body);
 
   // Log full response shape once so we can confirm the ID field name
   console.log('[telnyx-texml] response keys:', Object.keys(response.data || {}));

@@ -74,6 +74,7 @@ model RoutingConfig {
   transferNumber    String?       @map("transfer_number")
   telnyxAssistantId  String?       @map("telnyx_assistant_id")
   telnyxPhoneNumber  String?       @map("telnyx_phone_number")
+  telnyxAppId        String?       @map("telnyx_app_id")
   blandAgentId       String?       @map("bland_agent_id")
   vapiAssistantId   String?       @map("vapi_assistant_id")
   createdAt         DateTime      @default(now()) @map("created_at")
