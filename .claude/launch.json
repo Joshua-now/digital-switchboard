@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "switchboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["install", "--legacy-peer-deps", "&&", "npm", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

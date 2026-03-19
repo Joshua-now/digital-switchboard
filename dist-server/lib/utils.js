@@ -23,6 +23,9 @@ export function normalizePhone(phone, defaultCountry = 'US') {
     }
 }
 export function isWithinQuietHours(timezone, quietStart, quietEnd) {
+    // No quiet hours configured — always call
+    if (!quietStart || !quietEnd)
+        return false;
     try {
         const now = new Date();
         const timeString = now.toLocaleTimeString('en-US', {
@@ -49,13 +52,27 @@ export function isWithinQuietHours(timezone, quietStart, quietEnd) {
         return false;
     }
 }
+/**
+ * 30-minute cooldown dedupe:
+ * - Same contact/phone within the same window => same dedupeKey (deduped)
+ * - After the window rolls over => new dedupeKey (allowed)
+ *
+ * Configure via env: DEDUPE_WINDOW_MINUTES (default 30)
+ */
 export function generateDedupeKey(contactId, phone) {
-    if (contactId) {
-        return `contact_${contactId}`;
+    const windowMinutesRaw = process.env.DEDUPE_WINDOW_MINUTES;
+    const windowMinutes = Number.isFinite(Number(windowMinutesRaw)) && Number(windowMinutesRaw) > 0
+        ? Number(windowMinutesRaw)
+        : 30;
+    const windowMs = windowMinutes * 60 * 1000;
+    const bucket = Math.floor(Date.now() / windowMs);
+    const safeContactId = contactId?.trim();
+    const safePhone = phone?.trim();
+    if (safeContactId) {
+        return `contact_${safeContactId}_w${windowMinutes}_b${bucket}`;
     }
-    if (phone) {
-        const date = new Date().toISOString().split('T')[0];
-        return `phone_${phone}_${date}`;
+    if (safePhone) {
+        return `phone_${safePhone}_w${windowMinutes}_b${bucket}`;
     }
     throw new Error('Cannot generate dedupe key without contactId or phone');
 }

@@ -6,10 +6,11 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { checkDatabaseConnection } from './lib/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { seedSuperAdmin } from './lib/seedSuperAdmin.js';
 import webhookRouter from './routes/webhook.js';
 import apiRouter from './routes/api.js';
-import path from "path";
-import { fileURLToPath } from "url";
+import path from 'path';
+import { fileURLToPath } from 'url';
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
@@ -60,10 +61,10 @@ app.use('/webhook', notFoundHandler);
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const clientDistPath = path.join(__dirname, "../dist");
+const clientDistPath = path.join(__dirname, '../dist');
 app.use(express.static(clientDistPath));
-app.get("*", (_req, res) => {
-    res.sendFile(path.join(clientDistPath, "index.html"));
+app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientDistPath, 'index.html'));
 });
 app.use(errorHandler);
 async function startServer() {
@@ -71,6 +72,9 @@ async function startServer() {
         const dbHealthy = await checkDatabaseConnection();
         if (!dbHealthy) {
             console.error('Database connection failed. Server may not function correctly.');
+        }
+        else {
+            await seedSuperAdmin();
         }
         app.listen(PORT, () => {
             console.log(`Digital Switchboard API running on port ${PORT}`);

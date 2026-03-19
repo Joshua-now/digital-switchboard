@@ -80,6 +80,48 @@ export async function startTelnyxAI(
   });
 }
 
+/** Dial an outbound call leg for warm transfer AMD flow (no AI — just a regular call) */
+export async function dialOutbound(
+  to: string,
+  clientReferenceId: string,
+  webhookUrl: string
+): Promise<string> {
+  const response = await api.post('/calls', {
+    connection_id: TELNYX_APP_ID,
+    to,
+    from: TELNYX_PHONE_NUMBER,
+    answering_machine_detection: 'premium',
+    client_reference_id: clientReferenceId,
+    webhook_url: webhookUrl,
+    webhook_url_method: 'POST',
+  });
+  const ccid = response.data?.data?.call_control_id as string;
+  if (!ccid) throw new Error('No call_control_id from outbound dial');
+  return ccid;
+}
+
+/** Play TTS on an active call leg (used for whisper to contractor) */
+export async function speakOnCall(callControlId: string, text: string): Promise<void> {
+  await api.post(`/calls/${callControlId}/actions/speak`, {
+    payload: text,
+    payload_type: 'text',
+    voice: 'female',
+    language: 'en-US',
+  });
+}
+
+/** Bridge two call legs together (warm transfer completion) */
+export async function bridgeCalls(callControlId: string, otherCallControlId: string): Promise<void> {
+  await api.post(`/calls/${callControlId}/actions/bridge`, {
+    call_control_id: otherCallControlId,
+  });
+}
+
+/** Hang up a call leg */
+export async function hangupCall(callControlId: string): Promise<void> {
+  await api.post(`/calls/${callControlId}/actions/hangup`, {});
+}
+
 /**
  * Decode client_state from base64 (called in webhook handler).
  */

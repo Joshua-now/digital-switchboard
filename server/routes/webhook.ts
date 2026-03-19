@@ -5,7 +5,87 @@ import { normalizePhone, isWithinQuietHours, generateDedupeKey } from '../lib/ut
 import { createAuditLog } from '../lib/audit.js';
 import { createCall as createBlandCall } from '../providers/bland.js';
 import { createCall as createVapiCall } from '../providers/vapi.js';
-import { makeTelnyxCall, decodeTelnyxClientState, startTelnyxAI } from '../providers/telnyx.js';
+import {
+  makeTelnyxCall,
+  decodeTelnyxClientState,
+  startTelnyxAI,
+  dialOutbound,
+  speakOnCall,
+  bridgeCalls,
+  hangupCall,
+} from '../providers/telnyx.js';
+
+// ─── Warm-transfer state (in-memory, same process) ────────────────────────────
+interface PendingTransfer {
+  resolve: (result: 'connected' | 'unavailable') => void;
+  leadCallControlId: string;
+  whisperText: string;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingTransfers = new Map<string, PendingTransfer>();
+
+async function handleTransferLegEvent(
+  eventType: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const joshuaCcid = payload.call_control_id as string;
+  const pending = pendingTransfers.get(joshuaCcid);
+
+  console.log(`[warm-transfer] ${eventType} | joshua:${joshuaCcid} | pending:${!!pending}`);
+
+  switch (eventType) {
+    case 'call.machine.detection.ended': {
+      const amdResult = payload.result as string; // 'human' | 'answering_machine' | 'not_sure'
+      console.log(`[warm-transfer] AMD result: ${amdResult}`);
+      if (amdResult === 'answering_machine') {
+        await hangupCall(joshuaCcid).catch(e => console.error('[warm-transfer] hangup failed:', e.message));
+        if (pending) {
+          clearTimeout(pending.timeout);
+          pendingTransfers.delete(joshuaCcid);
+          pending.resolve('unavailable');
+        }
+      } else {
+        // Human (or not_sure) — play whisper
+        if (pending) {
+          await speakOnCall(joshuaCcid, pending.whisperText).catch(async e => {
+            console.error('[warm-transfer] speak failed, bridging directly:', e.message);
+            await bridgeCalls(pending.leadCallControlId, joshuaCcid).catch(() => {});
+            clearTimeout(pending.timeout);
+            pendingTransfers.delete(joshuaCcid);
+            pending.resolve('connected');
+          });
+        }
+      }
+      break;
+    }
+
+    case 'call.speak.ended': {
+      // Whisper finished — bridge the two legs now
+      if (pending) {
+        await bridgeCalls(pending.leadCallControlId, joshuaCcid).catch(e =>
+          console.error('[warm-transfer] bridge failed:', e.message)
+        );
+        clearTimeout(pending.timeout);
+        pendingTransfers.delete(joshuaCcid);
+        pending.resolve('connected');
+      }
+      break;
+    }
+
+    case 'call.hangup': {
+      // Joshua hung up (or never answered) before we bridged
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingTransfers.delete(joshuaCcid);
+        pending.resolve('unavailable');
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+}
 
 const router = express.Router();
 
@@ -281,22 +361,55 @@ router.post('/vapi', async (req: Request, res: Response) => {
   }
 });
 
-// ─── Telnyx AI tool: transfer call ─────────────────────────────────────────────
-// Called by the AI assistant's webhook tool when it wants to transfer the call
+// ─── Telnyx AI tool: warm transfer with AMD + whisper + fallback ───────────────
+// Anna calls this webhook tool when she wants to transfer a qualified lead.
+// We dial Joshua separately with AMD. If he answers → whisper briefing → bridge.
+// If voicemail → hang up his leg → return "unavailable" so Anna books instead.
 router.post('/telnyx/transfer', async (req: Request, res: Response) => {
   try {
-    const { call_control_id, to } = req.body as { call_control_id?: string; to?: string };
-    const dest = to || process.env.DEFAULT_TRANSFER_NUMBER;
-    if (!call_control_id || !dest) {
-      res.status(400).json({ result: 'error', message: 'Missing call_control_id or destination' });
+    // Telnyx auto-injects call_control_id into webhook tool payloads
+    const leadCcid = req.body.call_control_id as string | undefined;
+    const leadName    = (req.body.lead_name    as string | undefined) || 'the lead';
+    const leadSummary = (req.body.lead_summary as string | undefined) || 'interested in your services';
+
+    const dest = process.env.DEFAULT_TRANSFER_NUMBER;
+    if (!leadCcid || !dest) {
+      res.status(400).json({ result: 'error', message: 'Missing call_control_id or DEFAULT_TRANSFER_NUMBER' });
       return;
     }
-    await axios.post(
-      `https://api.telnyx.com/v2/calls/${call_control_id}/actions/transfer`,
-      { to: dest },
-      { headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
-    );
-    res.json({ result: 'transferring', to: dest });
+
+    const whisperText =
+      `Hi Joshua — I have ${leadName} on the line. ${leadSummary}. Connecting you now.`;
+
+    const webhookUrl = `${process.env.BASE_URL}/webhook/telnyx`;
+    const clientRef  = `transfer_from_${leadCcid}`;
+
+    // Dial Joshua outbound with AMD
+    const joshuaCcid = await dialOutbound(dest, clientRef, webhookUrl);
+    console.log(`[warm-transfer] Dialed Joshua at ${dest} | ccid:${joshuaCcid}`);
+
+    // Wait up to 25 s for AMD result → whisper → bridge
+    const result = await new Promise<'connected' | 'unavailable'>((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingTransfers.delete(joshuaCcid);
+        hangupCall(joshuaCcid).catch(() => {});
+        console.log('[warm-transfer] Timed out — Joshua not reached');
+        resolve('unavailable');
+      }, 25000);
+
+      pendingTransfers.set(joshuaCcid, {
+        resolve,
+        leadCallControlId: leadCcid,
+        whisperText,
+        timeout,
+      });
+    });
+
+    if (result === 'connected') {
+      res.json({ result: 'connected', message: `${leadName} has been connected with Joshua.` });
+    } else {
+      res.json({ result: 'unavailable', message: 'Joshua is not available right now.' });
+    }
   } catch (err: any) {
     console.error('[telnyx-transfer]', err.response?.data || err.message);
     res.status(500).json({ result: 'error', message: err.message });
@@ -314,6 +427,14 @@ router.post('/telnyx', async (req: Request, res: Response) => {
 
     const eventType = event.event_type as string;
     const payload = event.payload ?? {};
+
+    // ── Warm-transfer leg events (Joshua's outbound call — no client_state) ──
+    const clientRef = (payload.client_reference_id as string) || '';
+    if (clientRef.startsWith('transfer_from_')) {
+      await handleTransferLegEvent(eventType, payload as Record<string, unknown>);
+      return;
+    }
+
     const clientState = payload.client_state
       ? decodeTelnyxClientState(payload.client_state as string)
       : null;
