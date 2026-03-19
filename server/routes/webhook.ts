@@ -228,7 +228,11 @@ router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
         );
         await prisma.call.update({
           where: { id: callRecord.id },
-          data: { providerCallId: result.callId, status: 'IN_PROGRESS', startedAt: new Date() },
+          data: {
+            providerCallId: result.callId === 'unknown' ? null : result.callId,
+            status: 'IN_PROGRESS',
+            startedAt: new Date(),
+          },
         });
         await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'CALLING' } });
         await createAuditLog('CALL_INITIATED', `Telnyx call initiated to ${phone}`, clientId, {
