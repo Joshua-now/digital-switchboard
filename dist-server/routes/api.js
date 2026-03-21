@@ -295,7 +295,7 @@ async function saveRoutingConfig(req, res) {
             res.status(404).json({ error: 'Client not found' });
             return;
         }
-        const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, blandAgentId, vapiAssistantId } = req.body;
+        const { active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, telnyxPhoneNumber, telnyxAppId, blandAgentId, vapiAssistantId } = req.body;
         const clientId = req.params.id;
         const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
         const resolvedProvider = provider && validProviders.includes(provider) ? provider : undefined;
@@ -312,6 +312,8 @@ async function saveRoutingConfig(req, res) {
                     transferNumber: transferNumber !== undefined ? (transferNumber || null) : existingConfig.transferNumber,
                     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
                     ...(telnyxAssistantId !== undefined ? { telnyxAssistantId: telnyxAssistantId || null } : {}),
+                    ...(telnyxPhoneNumber !== undefined ? { telnyxPhoneNumber: telnyxPhoneNumber || null } : {}),
+                    ...(telnyxAppId !== undefined ? { telnyxAppId: telnyxAppId || null } : {}),
                     ...(blandAgentId !== undefined ? { blandAgentId: blandAgentId || null } : {}),
                     ...(vapiAssistantId !== undefined ? { vapiAssistantId: vapiAssistantId || null } : {}),
                 },
@@ -328,6 +330,8 @@ async function saveRoutingConfig(req, res) {
                     transferNumber: transferNumber || null,
                     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
                     ...(telnyxAssistantId ? { telnyxAssistantId } : {}),
+                    ...(telnyxPhoneNumber ? { telnyxPhoneNumber } : {}),
+                    ...(telnyxAppId ? { telnyxAppId } : {}),
                     ...(blandAgentId ? { blandAgentId } : {}),
                     ...(vapiAssistantId ? { vapiAssistantId } : {}),
                 },
@@ -345,6 +349,129 @@ router.get('/clients/:id/routing-config', requireAuth, getRoutingConfig);
 router.get('/clients/:id/routing', requireAuth, getRoutingConfig);
 router.post('/clients/:id/routing-config', requireAuth, saveRoutingConfig);
 router.post('/clients/:id/routing', requireAuth, saveRoutingConfig);
+// ─── Routing Configs (plural — multi-campaign support) ────────────────────────
+router.get('/clients/:id/routing-configs', requireAuth, async (req, res) => {
+    try {
+        const scope = agencyScope(req.user);
+        const clientExists = await prisma.client.findFirst({ where: { id: req.params.id, ...scope } });
+        if (!clientExists) {
+            res.status(404).json({ error: 'Client not found' });
+            return;
+        }
+        const configs = await prisma.routingConfig.findMany({
+            where: { clientId: req.params.id },
+            orderBy: { createdAt: 'asc' },
+        });
+        res.json(configs);
+    }
+    catch (err) {
+        console.error('Error fetching routing configs:', err);
+        res.status(500).json({ error: 'Failed to fetch routing configs' });
+    }
+});
+router.post('/clients/:id/routing-configs', requireAuth, async (req, res) => {
+    try {
+        const scope = agencyScope(req.user);
+        const clientExists = await prisma.client.findFirst({ where: { id: req.params.id, ...scope } });
+        if (!clientExists) {
+            res.status(404).json({ error: 'Client not found' });
+            return;
+        }
+        const { name, active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, telnyxPhoneNumber, telnyxAppId, blandAgentId, vapiAssistantId } = req.body;
+        const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
+        const resolvedProvider = provider && validProviders.includes(provider) ? provider : 'BLAND';
+        const config = await prisma.routingConfig.create({
+            data: {
+                clientId: req.params.id,
+                name: name?.trim() || 'New Campaign',
+                active: active !== undefined ? active : true,
+                callWithinSeconds: callWithinSeconds || 60,
+                instructions: instructions || null,
+                questions: questions || null,
+                transferNumber: transferNumber || null,
+                provider: resolvedProvider,
+                ...(telnyxAssistantId ? { telnyxAssistantId } : {}),
+                ...(telnyxPhoneNumber ? { telnyxPhoneNumber } : {}),
+                ...(telnyxAppId ? { telnyxAppId } : {}),
+                ...(blandAgentId ? { blandAgentId } : {}),
+                ...(vapiAssistantId ? { vapiAssistantId } : {}),
+            },
+        });
+        await createAuditLog('ROUTING_CONFIG_CREATED', `Campaign created: ${config.name}`, req.params.id);
+        res.status(201).json(config);
+    }
+    catch (err) {
+        console.error('Error creating routing config:', err);
+        res.status(500).json({ error: 'Failed to create routing config' });
+    }
+});
+router.put('/clients/:id/routing-configs/:configId', requireAuth, async (req, res) => {
+    try {
+        const scope = agencyScope(req.user);
+        const clientExists = await prisma.client.findFirst({ where: { id: req.params.id, ...scope } });
+        if (!clientExists) {
+            res.status(404).json({ error: 'Client not found' });
+            return;
+        }
+        const existing = await prisma.routingConfig.findFirst({
+            where: { id: req.params.configId, clientId: req.params.id },
+        });
+        if (!existing) {
+            res.status(404).json({ error: 'Routing config not found' });
+            return;
+        }
+        const { name, active, callWithinSeconds, instructions, questions, transferNumber, provider, telnyxAssistantId, telnyxPhoneNumber, telnyxAppId, blandAgentId, vapiAssistantId } = req.body;
+        const validProviders = ['BLAND', 'VAPI', 'TELNYX'];
+        const resolvedProvider = provider && validProviders.includes(provider) ? provider : undefined;
+        const config = await prisma.routingConfig.update({
+            where: { id: req.params.configId },
+            data: {
+                ...(name !== undefined ? { name: name.trim() || existing.name } : {}),
+                ...(active !== undefined ? { active } : {}),
+                ...(callWithinSeconds ? { callWithinSeconds } : {}),
+                ...(instructions !== undefined ? { instructions: instructions || null } : {}),
+                ...(questions !== undefined ? { questions } : {}),
+                ...(transferNumber !== undefined ? { transferNumber: transferNumber || null } : {}),
+                ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+                ...(telnyxAssistantId !== undefined ? { telnyxAssistantId: telnyxAssistantId || null } : {}),
+                ...(telnyxPhoneNumber !== undefined ? { telnyxPhoneNumber: telnyxPhoneNumber || null } : {}),
+                ...(telnyxAppId !== undefined ? { telnyxAppId: telnyxAppId || null } : {}),
+                ...(blandAgentId !== undefined ? { blandAgentId: blandAgentId || null } : {}),
+                ...(vapiAssistantId !== undefined ? { vapiAssistantId: vapiAssistantId || null } : {}),
+            },
+        });
+        await createAuditLog('ROUTING_CONFIG_UPDATED', `Campaign updated: ${config.name}`, req.params.id);
+        res.json(config);
+    }
+    catch (err) {
+        console.error('Error updating routing config:', err);
+        res.status(500).json({ error: 'Failed to update routing config' });
+    }
+});
+router.delete('/clients/:id/routing-configs/:configId', requireAuth, async (req, res) => {
+    try {
+        const scope = agencyScope(req.user);
+        const clientExists = await prisma.client.findFirst({ where: { id: req.params.id, ...scope } });
+        if (!clientExists) {
+            res.status(404).json({ error: 'Client not found' });
+            return;
+        }
+        const existing = await prisma.routingConfig.findFirst({
+            where: { id: req.params.configId, clientId: req.params.id },
+        });
+        if (!existing) {
+            res.status(404).json({ error: 'Routing config not found' });
+            return;
+        }
+        await prisma.routingConfig.delete({ where: { id: req.params.configId } });
+        await createAuditLog('ROUTING_CONFIG_DELETED', `Campaign deleted: ${existing.name}`, req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        console.error('Error deleting routing config:', err);
+        res.status(500).json({ error: 'Failed to delete routing config' });
+    }
+});
 // ─── Leads ────────────────────────────────────────────────────────────────────
 router.get('/leads', requireAuth, async (req, res) => {
     try {
@@ -494,6 +621,60 @@ router.get('/admin/agencies', requireAuth, requireSuperAdmin, async (req, res) =
         res.status(500).json({ error: 'Failed to fetch agencies' });
     }
 });
+// One-time migration: merge N clients into one with multiple routing configs
+router.post('/admin/merge-clients', requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+        const { keepClientId, newName, sourceClientIds } = req.body;
+        if (!keepClientId || !newName || !sourceClientIds?.length) {
+            res.status(400).json({ error: 'keepClientId, newName, and sourceClientIds required' });
+            return;
+        }
+        const results = [];
+        // Rename the kept client
+        await prisma.client.update({ where: { id: keepClientId }, data: { name: newName } });
+        results.push(`Renamed client → "${newName}"`);
+        for (const src of sourceClientIds) {
+            const config = await prisma.routingConfig.findFirst({ where: { clientId: src.id } });
+            if (src.id === keepClientId) {
+                if (config) {
+                    await prisma.routingConfig.update({ where: { id: config.id }, data: { name: src.campaignName } });
+                    results.push(`Renamed kept config → "${src.campaignName}"`);
+                }
+                continue;
+            }
+            if (config) {
+                await prisma.routingConfig.update({ where: { id: config.id }, data: { clientId: keepClientId, name: src.campaignName } });
+                results.push(`Moved config "${src.campaignName}" to kept client`);
+            }
+            // Delete leads that would conflict on (clientId, dedupeKey) after the move
+            const srcLeads = await prisma.lead.findMany({ where: { clientId: src.id }, select: { id: true, dedupeKey: true } });
+            const existingKeys = new Set((await prisma.lead.findMany({ where: { clientId: keepClientId }, select: { dedupeKey: true } })).map(l => l.dedupeKey));
+            const conflicting = srcLeads.filter(l => existingKeys.has(l.dedupeKey)).map(l => l.id);
+            if (conflicting.length) {
+                // Delete calls for conflicting leads first (FK constraint), then leads
+                await prisma.call.deleteMany({ where: { leadId: { in: conflicting } } });
+                await prisma.lead.deleteMany({ where: { id: { in: conflicting } } });
+                results.push(`Removed ${conflicting.length} duplicate leads from ${src.id}`);
+            }
+            const leads = await prisma.lead.updateMany({ where: { clientId: src.id }, data: { clientId: keepClientId } });
+            const calls = await prisma.call.updateMany({ where: { clientId: src.id }, data: { clientId: keepClientId } });
+            await prisma.auditLog.updateMany({ where: { clientId: src.id }, data: { clientId: keepClientId } });
+            await prisma.booking.updateMany({ where: { clientId: src.id }, data: { clientId: keepClientId } }).catch(() => { });
+            results.push(`Moved ${leads.count} leads, ${calls.count} calls from ${src.id}`);
+            await prisma.client.delete({ where: { id: src.id } });
+            results.push(`Deleted old client ${src.id}`);
+        }
+        const final = await prisma.client.findUnique({
+            where: { id: keepClientId },
+            include: { routingConfigs: { select: { id: true, name: true } }, _count: { select: { leads: true, calls: true } } },
+        });
+        res.json({ success: true, results, client: final });
+    }
+    catch (err) {
+        console.error('Merge error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // One-time migration: assign orphaned clients (agencyId = null) to named agency
 router.post('/admin/migrate-clients', requireAuth, requireSuperAdmin, async (req, res) => {
     try {
@@ -531,6 +712,40 @@ router.patch('/admin/agencies/:id', requireAuth, requireSuperAdmin, async (req, 
     catch (err) {
         console.error('Error updating agency:', err);
         res.status(500).json({ error: 'Failed to update agency' });
+    }
+});
+// One-time super admin setup — only works when no SUPER_ADMIN exists yet
+router.post('/admin/init', async (req, res) => {
+    try {
+        const { email, password, setupKey } = req.body;
+        const expectedKey = process.env.SETUP_KEY;
+        if (!expectedKey) {
+            res.status(403).json({ error: 'Setup not enabled (SETUP_KEY not configured)' });
+            return;
+        }
+        if (setupKey !== expectedKey) {
+            res.status(403).json({ error: 'Invalid setup key' });
+            return;
+        }
+        if (!email?.trim() || !password) {
+            res.status(400).json({ error: 'email and password required' });
+            return;
+        }
+        const existingSuperAdmin = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' } });
+        if (existingSuperAdmin) {
+            res.status(409).json({ error: 'Super admin already exists', email: existingSuperAdmin.email });
+            return;
+        }
+        const passwordHash = await hashPassword(password);
+        const user = await prisma.user.create({
+            data: { email: email.toLowerCase().trim(), passwordHash, name: 'Super Admin', role: 'SUPER_ADMIN', agencyId: null },
+        });
+        console.log(`[init] Super admin created: ${user.email}`);
+        res.status(201).json({ success: true, email: user.email });
+    }
+    catch (err) {
+        console.error('Init error:', err);
+        res.status(500).json({ error: 'Failed to create super admin' });
     }
 });
 export default router;
