@@ -1,34 +1,50 @@
--- Baseline migration — marks existing schema as applied
--- Generated from schema.prisma for Railway deploy
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "AgencyStatus" AS ENUM ('ACTIVE', 'SUSPENDED');
 
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "UserRole" AS ENUM ('SUPER_ADMIN', 'AGENCY_ADMIN');
+
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "ClientStatus" AS ENUM ('ACTIVE', 'INACTIVE');
+
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "CallProvider" AS ENUM ('BLAND', 'VAPI', 'TELNYX');
+
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "CallStatus" AS ENUM ('NEW', 'QUEUED', 'CALLING', 'COMPLETED', 'FAILED', 'SKIPPED');
+
+-- CreateEnum
+CREATE TYPE IF NOT EXISTS "CallStatusEnum" AS ENUM ('CREATED', 'IN_PROGRESS', 'COMPLETED', 'FAILED');
+
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "agencies" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "status" "AgencyStatus" NOT NULL DEFAULT 'ACTIVE',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "agencies_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT NOT NULL,
     "agency_id" TEXT,
     "email" TEXT NOT NULL,
     "password_hash" TEXT NOT NULL,
     "name" TEXT,
-    "role" TEXT NOT NULL DEFAULT 'AGENCY_ADMIN',
+    "role" "UserRole" NOT NULL DEFAULT 'AGENCY_ADMIN',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
-
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "clients" (
     "id" TEXT NOT NULL,
     "agency_id" TEXT,
     "name" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "status" "ClientStatus" NOT NULL DEFAULT 'ACTIVE',
     "timezone" TEXT NOT NULL DEFAULT 'America/New_York',
     "quiet_hours_start" TEXT,
     "quiet_hours_end" TEXT,
@@ -38,13 +54,12 @@ CREATE TABLE IF NOT EXISTS "clients" (
     CONSTRAINT "clients_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "clients_ghl_location_id_key" ON "clients"("ghl_location_id");
-
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "routing_configs" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
     "name" TEXT NOT NULL DEFAULT 'Default',
-    "provider" TEXT NOT NULL DEFAULT 'BLAND',
+    "provider" "CallProvider" NOT NULL DEFAULT 'BLAND',
     "active" BOOLEAN NOT NULL DEFAULT true,
     "call_within_seconds" INTEGER NOT NULL DEFAULT 60,
     "instructions" TEXT,
@@ -60,6 +75,7 @@ CREATE TABLE IF NOT EXISTS "routing_configs" (
     CONSTRAINT "routing_configs_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "leads" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -70,21 +86,20 @@ CREATE TABLE IF NOT EXISTS "leads" (
     "source" TEXT,
     "payload_json" JSONB NOT NULL,
     "dedupe_key" TEXT NOT NULL,
-    "call_status" TEXT NOT NULL DEFAULT 'NEW',
+    "call_status" "CallStatus" NOT NULL DEFAULT 'NEW',
     "skip_reason" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "leads_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "leads_client_id_dedupe_key_key" ON "leads"("client_id", "dedupe_key");
-
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "calls" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
     "lead_id" TEXT NOT NULL,
-    "provider" TEXT NOT NULL DEFAULT 'BLAND',
+    "provider" "CallProvider" NOT NULL DEFAULT 'BLAND',
     "provider_call_id" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'CREATED',
+    "status" "CallStatusEnum" NOT NULL DEFAULT 'CREATED',
     "outcome" TEXT,
     "transcript" TEXT,
     "recording_url" TEXT,
@@ -95,8 +110,7 @@ CREATE TABLE IF NOT EXISTS "calls" (
     CONSTRAINT "calls_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "calls_provider_call_id_key" ON "calls"("provider_call_id");
-
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "bookings" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -114,6 +128,7 @@ CREATE TABLE IF NOT EXISTS "bookings" (
     CONSTRAINT "bookings_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE IF NOT EXISTS "audit_logs" (
     "id" TEXT NOT NULL,
     "client_id" TEXT,
@@ -124,27 +139,24 @@ CREATE TABLE IF NOT EXISTS "audit_logs" (
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
 );
 
--- Foreign keys
-ALTER TABLE "users" ADD CONSTRAINT "users_agency_id_fkey"
-    FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
 
-ALTER TABLE "clients" ADD CONSTRAINT "clients_agency_id_fkey"
-    FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "clients_ghl_location_id_key" ON "clients"("ghl_location_id");
 
-ALTER TABLE "routing_configs" ADD CONSTRAINT "routing_configs_client_id_fkey"
-    FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "leads_client_id_dedupe_key_key" ON "leads"("client_id", "dedupe_key");
 
-ALTER TABLE "leads" ADD CONSTRAINT "leads_client_id_fkey"
-    FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "calls_provider_call_id_key" ON "calls"("provider_call_id");
 
-ALTER TABLE "calls" ADD CONSTRAINT "calls_client_id_fkey"
-    FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE "calls" ADD CONSTRAINT "calls_lead_id_fkey"
-    FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE "bookings" ADD CONSTRAINT "bookings_client_id_fkey"
-    FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_client_id_fkey"
-    FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (idempotent)
+DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "clients" ADD CONSTRAINT "clients_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "routing_configs" ADD CONSTRAINT "routing_configs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "leads" ADD CONSTRAINT "leads_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "calls" ADD CONSTRAINT "calls_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "calls" ADD CONSTRAINT "calls_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "bookings" ADD CONSTRAINT "bookings_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
