@@ -276,6 +276,23 @@ export const api = {
         headers,
       });
     },
+    // ── Multi-campaign routing configs ──
+    listRoutingConfigs: (clientId: string) =>
+      fetchApi<any[]>(`/api/clients/${encodeURIComponent(clientId)}/routing-configs`),
+    createRoutingConfig: (clientId: string, payload: any) =>
+      fetchApi<any>(`/api/clients/${encodeURIComponent(clientId)}/routing-configs`, {
+        method: "POST",
+        body: payload,
+      }),
+    updateRoutingConfig: (clientId: string, configId: string, payload: any) =>
+      fetchApi<any>(`/api/clients/${encodeURIComponent(clientId)}/routing-configs/${encodeURIComponent(configId)}`, {
+        method: "PUT",
+        body: payload,
+      }),
+    deleteRoutingConfig: (clientId: string, configId: string) =>
+      fetchApi<any>(`/api/clients/${encodeURIComponent(clientId)}/routing-configs/${encodeURIComponent(configId)}`, {
+        method: "DELETE",
+      }),
   },
 
   /**

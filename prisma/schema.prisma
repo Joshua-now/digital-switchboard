@@ -58,6 +58,7 @@ model Client {
   routingConfigs  RoutingConfig[]
   leads           Lead[]
   calls           Call[]
+  bookings        Booking[]
   auditLogs       AuditLog[]
 
   @@map("clients")
@@ -65,7 +66,8 @@ model Client {
 
 model RoutingConfig {
   id                String        @id @default(uuid())
-  clientId          String        @unique @map("client_id")
+  clientId          String        @map("client_id")
+  name              String        @default("Default")
   provider          CallProvider  @default(BLAND)
   active            Boolean       @default(true)
   callWithinSeconds Int           @default(60) @map("call_within_seconds")
@@ -125,6 +127,26 @@ model Call {
   lead               Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("calls")
+}
+
+model Booking {
+  id              String   @id @default(uuid())
+  clientId        String   @map("client_id")
+  leadId          String?  @map("lead_id")
+  name            String?
+  email           String?
+  phone           String?
+  businessName    String?  @map("business_name")
+  city            String?
+  appointmentDate String?  @map("appointment_date")
+  appointmentTime String?  @map("appointment_time")
+  notes           String?  @db.Text
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("bookings")
 }
 
 model AuditLog {

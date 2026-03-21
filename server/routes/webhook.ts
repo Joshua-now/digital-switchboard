@@ -107,161 +107,181 @@ const TELNYX_CLIENT_CONFIG: Record<string, { phone: string; appId: string; assis
 
 const router = express.Router();
 
-// ─── GoHighLevel inbound webhook ──────────────────────────────────────────────
+// ─── Shared GHL handler — used by both per-config and per-client routes ────────
+async function processGhlWebhook(
+  clientId: string,
+  client: { id: string; name: string; status: string; timezone: string; quietHoursStart: string | null; quietHoursEnd: string | null },
+  routingConfig: any,
+  payload: any,
+  res: Response
+): Promise<void> {
+  const rawPhone = payload.phone || payload.contact?.phone || payload.phoneNumber;
+  if (!rawPhone) {
+    await createAuditLog('WEBHOOK_ERROR', 'No phone number in payload', clientId, { payload });
+    res.status(400).json({ error: 'Phone number required' });
+    return;
+  }
+
+  const phone = normalizePhone(rawPhone);
+  if (!phone) {
+    await createAuditLog('WEBHOOK_ERROR', `Invalid phone number: ${rawPhone}`, clientId, { payload });
+    res.status(400).json({ error: 'Invalid phone number' });
+    return;
+  }
+
+  const contactId = payload.contactId || payload.contact_id || payload.contact?.id;
+  const dedupeKey = generateDedupeKey(contactId, phone);
+
+  const existingLead = await prisma.lead.findUnique({
+    where: { clientId_dedupeKey: { clientId, dedupeKey } },
+  });
+
+  if (existingLead) {
+    await createAuditLog('WEBHOOK_DUPLICATE', `Duplicate lead ignored: ${dedupeKey}`, clientId, {
+      leadId: existingLead.id, dedupeKey,
+    });
+    res.status(200).json({ message: 'Lead already processed', leadId: existingLead.id });
+    return;
+  }
+
+  const lead = await prisma.lead.create({
+    data: {
+      clientId,
+      firstName: payload.firstName || payload.first_name || payload.contact?.firstName || null,
+      lastName: payload.lastName || payload.last_name || payload.contact?.lastName || null,
+      phone,
+      email: payload.email || payload.contact?.email || null,
+      source: payload.source || 'gohighlevel',
+      payloadJson: payload,
+      dedupeKey,
+      callStatus: 'NEW',
+    },
+  });
+
+  await createAuditLog('LEAD_CREATED', `New lead created: ${phone}`, clientId, { leadId: lead.id, phone });
+
+  if (client.status !== 'ACTIVE') {
+    await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'SKIPPED', skipReason: 'Client inactive' } });
+    res.status(200).json({ message: 'Lead received but client inactive', leadId: lead.id });
+    return;
+  }
+
+  if (isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)) {
+    await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'SKIPPED', skipReason: 'Quiet hours' } });
+    await createAuditLog('CALL_SKIPPED', `Call skipped due to quiet hours: ${phone}`, clientId, { leadId: lead.id });
+    res.status(200).json({ message: 'Lead received but in quiet hours', leadId: lead.id });
+    return;
+  }
+
+  await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'QUEUED' } });
+
+  const provider = routingConfig.provider || 'BLAND';
+  let callResult: { success: boolean; callId?: string; error?: string };
+
+  if (provider === 'VAPI') {
+    callResult = await createVapiCall(
+      lead.id, clientId, phone,
+      routingConfig.instructions,
+      routingConfig.transferNumber || undefined,
+      lead.firstName || undefined,
+      routingConfig.vapiAssistantId || undefined
+    );
+  } else if (provider === 'TELNYX') {
+    try {
+      const callRecord = await prisma.call.create({
+        data: { clientId, leadId: lead.id, provider: 'TELNYX', status: 'CREATED' },
+      });
+      const result = await makeTelnyxCall(
+        phone,
+        routingConfig.instructions,
+        routingConfig.transferNumber || null,
+        lead.id,
+        clientId,
+        callRecord.id,
+        lead.firstName || undefined,
+        routingConfig.telnyxAssistantId || TELNYX_CLIENT_CONFIG[clientId]?.assistantId,
+        routingConfig.telnyxPhoneNumber || TELNYX_CLIENT_CONFIG[clientId]?.phone,
+        routingConfig.telnyxAppId || TELNYX_CLIENT_CONFIG[clientId]?.appId
+      );
+      await prisma.call.update({
+        where: { id: callRecord.id },
+        data: { providerCallId: result.callId === 'unknown' ? null : result.callId, status: 'IN_PROGRESS', startedAt: new Date() },
+      });
+      await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'CALLING' } });
+      await createAuditLog('CALL_INITIATED', `Telnyx call initiated to ${phone}`, clientId, {
+        leadId: lead.id, callId: callRecord.id, providerCallId: result.callId,
+      });
+      callResult = { success: true, callId: result.callId };
+    } catch (err: any) {
+      await createAuditLog('CALL_FAILED', `Telnyx call failed: ${err.message}`, clientId, { leadId: lead.id });
+      await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'FAILED', skipReason: err.message } });
+      callResult = { success: false, error: err.message };
+    }
+  } else {
+    callResult = await createBlandCall(
+      lead.id, clientId, phone,
+      routingConfig.instructions,
+      routingConfig.transferNumber || undefined,
+      routingConfig.blandAgentId || undefined
+    );
+  }
+
+  if (callResult.success) {
+    res.status(200).json({ message: 'Lead received and call initiated', leadId: lead.id, callId: callResult.callId });
+  } else {
+    res.status(200).json({ message: 'Lead received but call failed', leadId: lead.id, error: callResult.error });
+  }
+}
+
+// ─── GoHighLevel per-config webhook (multi-campaign) ──────────────────────────
+// Each campaign has its own URL: POST /webhook/gohighlevel/config/:configId
+// This is the preferred URL for new setups.
+router.post('/gohighlevel/config/:configId', async (req: Request, res: Response) => {
+  const { configId } = req.params;
+  try {
+    const routingConfig = await prisma.routingConfig.findUnique({
+      where: { id: configId },
+      include: { client: true },
+    });
+    if (!routingConfig) {
+      await createAuditLog('WEBHOOK_ERROR', `Config not found: ${configId}`, undefined, { configId });
+      res.status(404).json({ error: 'Routing config not found' });
+      return;
+    }
+    if (!routingConfig.active) {
+      res.status(200).json({ message: 'Campaign is not active' });
+      return;
+    }
+    await processGhlWebhook(routingConfig.clientId, routingConfig.client, routingConfig, req.body, res);
+  } catch (error: any) {
+    console.error('Per-config webhook error:', error);
+    await createAuditLog('WEBHOOK_ERROR', error.message, undefined, { configId, error: error.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── GoHighLevel per-client webhook (legacy — picks first active config) ───────
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const payload = req.body;
-
   try {
     const client = await prisma.client.findUnique({
       where: { id: clientId },
-      include: {
-        routingConfigs: {
-          where: { active: true },
-          take: 1,
-        },
-      },
+      include: { routingConfigs: { where: { active: true }, orderBy: { createdAt: 'asc' }, take: 1 } },
     });
-
     if (!client) {
-      await createAuditLog('WEBHOOK_ERROR', `Client not found: ${clientId}`, undefined, { clientId, payload });
+      await createAuditLog('WEBHOOK_ERROR', `Client not found: ${clientId}`, undefined, { clientId });
       res.status(404).json({ error: 'Client not found' });
       return;
     }
-
-    const rawPhone = payload.phone || payload.contact?.phone || payload.phoneNumber;
-    if (!rawPhone) {
-      await createAuditLog('WEBHOOK_ERROR', 'No phone number in payload', clientId, { payload });
-      res.status(400).json({ error: 'Phone number required' });
-      return;
-    }
-
-    const phone = normalizePhone(rawPhone);
-    if (!phone) {
-      await createAuditLog('WEBHOOK_ERROR', `Invalid phone number: ${rawPhone}`, clientId, { payload });
-      res.status(400).json({ error: 'Invalid phone number' });
-      return;
-    }
-
-    const contactId = payload.contactId || payload.contact_id || payload.contact?.id;
-    const dedupeKey = generateDedupeKey(contactId, phone);
-
-    const existingLead = await prisma.lead.findUnique({
-      where: { clientId_dedupeKey: { clientId, dedupeKey } },
-    });
-
-    if (existingLead) {
-      await createAuditLog('WEBHOOK_DUPLICATE', `Duplicate lead ignored: ${dedupeKey}`, clientId, {
-        leadId: existingLead.id,
-        dedupeKey,
-      });
-      res.status(200).json({ message: 'Lead already processed', leadId: existingLead.id });
-      return;
-    }
-
-    const lead = await prisma.lead.create({
-      data: {
-        clientId,
-        firstName: payload.firstName || payload.first_name || payload.contact?.firstName || null,
-        lastName: payload.lastName || payload.last_name || payload.contact?.lastName || null,
-        phone,
-        email: payload.email || payload.contact?.email || null,
-        source: payload.source || 'gohighlevel',
-        payloadJson: payload,
-        dedupeKey,
-        callStatus: 'NEW',
-      },
-    });
-
-    await createAuditLog('LEAD_CREATED', `New lead created: ${phone}`, clientId, { leadId: lead.id, phone });
-
-    if (client.status !== 'ACTIVE') {
-      await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'SKIPPED', skipReason: 'Client inactive' } });
-      res.status(200).json({ message: 'Lead received but client inactive', leadId: lead.id });
-      return;
-    }
-
     const routingConfig = client.routingConfigs[0];
     if (!routingConfig) {
-      await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'SKIPPED', skipReason: 'No active routing config' } });
-      res.status(200).json({ message: 'Lead received but no routing config', leadId: lead.id });
+      res.status(200).json({ message: 'Lead received but no active routing config' });
       return;
     }
-
-    if (isWithinQuietHours(client.timezone, client.quietHoursStart, client.quietHoursEnd)) {
-      await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'SKIPPED', skipReason: 'Quiet hours' } });
-      await createAuditLog('CALL_SKIPPED', `Call skipped due to quiet hours: ${phone}`, clientId, { leadId: lead.id });
-      res.status(200).json({ message: 'Lead received but in quiet hours', leadId: lead.id });
-      return;
-    }
-
-    await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'QUEUED' } });
-
-    const provider = (routingConfig as any).provider || 'BLAND';
-    let callResult: { success: boolean; callId?: string; error?: string };
-
-    if (provider === 'VAPI') {
-      callResult = await createVapiCall(
-        lead.id, clientId, phone,
-        routingConfig.instructions,
-        routingConfig.transferNumber || undefined,
-        lead.firstName || undefined,
-        (routingConfig as any).vapiAssistantId || undefined
-      );
-    } else if (provider === 'TELNYX') {
-      try {
-        // Create the call record first so we have an internalCallId
-        const callRecord = await prisma.call.create({
-          data: { clientId, leadId: lead.id, provider: 'TELNYX', status: 'CREATED' },
-        });
-        const result = await makeTelnyxCall(
-          phone,
-          routingConfig.instructions,
-          routingConfig.transferNumber || null,
-          lead.id,
-          clientId,
-          callRecord.id,
-          lead.firstName || undefined,
-          (routingConfig as any).telnyxAssistantId || TELNYX_CLIENT_CONFIG[clientId]?.assistantId,
-          (routingConfig as any).telnyxPhoneNumber || TELNYX_CLIENT_CONFIG[clientId]?.phone,
-          (routingConfig as any).telnyxAppId || TELNYX_CLIENT_CONFIG[clientId]?.appId
-        );
-        await prisma.call.update({
-          where: { id: callRecord.id },
-          data: {
-            providerCallId: result.callId === 'unknown' ? null : result.callId,
-            status: 'IN_PROGRESS',
-            startedAt: new Date(),
-          },
-        });
-        await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'CALLING' } });
-        await createAuditLog('CALL_INITIATED', `Telnyx call initiated to ${phone}`, clientId, {
-          leadId: lead.id, callId: callRecord.id, providerCallId: result.callId,
-        });
-        callResult = { success: true, callId: result.callId };
-      } catch (err: any) {
-        await createAuditLog('CALL_FAILED', `Telnyx call failed: ${err.message}`, clientId, { leadId: lead.id });
-        await prisma.lead.update({ where: { id: lead.id }, data: { callStatus: 'FAILED', skipReason: err.message } });
-        callResult = { success: false, error: err.message };
-      }
-    } else {
-      // Default: BLAND
-      callResult = await createBlandCall(
-        lead.id, clientId, phone,
-        routingConfig.instructions,
-        routingConfig.transferNumber || undefined,
-        (routingConfig as any).blandAgentId || undefined
-      );
-    }
-
-    if (callResult.success) {
-      res.status(200).json({ message: 'Lead received and call initiated', leadId: lead.id, callId: callResult.callId });
-    } else {
-      res.status(200).json({ message: 'Lead received but call failed', leadId: lead.id, error: callResult.error });
-    }
+    await processGhlWebhook(clientId, client, routingConfig, req.body, res);
   } catch (error: any) {
     console.error('Webhook error:', error);
-    await createAuditLog('WEBHOOK_ERROR', error.message, clientId, { payload, error: error.message });
+    await createAuditLog('WEBHOOK_ERROR', error.message, clientId, { error: error.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -382,6 +402,97 @@ router.post('/vapi', async (req: Request, res: Response) => {
     console.error('VAPI webhook error:', error);
     await createAuditLog('WEBHOOK_ERROR', error.message, undefined, { payload, error: error.message });
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Telnyx AI tool: save booking ─────────────────────────────────────────────
+// Called by all 3 AI agents (Anna/Riley/Maya) after collecting booking details.
+// Telnyx auto-injects call_control_id; agent passes name/email/phone/date/time.
+router.post('/telnyx/booking', async (req: Request, res: Response) => {
+  try {
+    const {
+      lead_name,
+      lead_email,
+      lead_phone,
+      business_name,
+      city,
+      appointment_date,
+      appointment_time,
+      notes,
+      call_control_id,
+    } = req.body as Record<string, string | undefined>;
+
+    console.log('[booking] received:', { lead_name, lead_phone, appointment_date, appointment_time });
+
+    // Find the lead by phone to get clientId
+    let clientId: string | null = null;
+    let leadId: string | null = null;
+
+    if (lead_phone) {
+      const normalizedPhone = lead_phone.replace(/\D/g, '');
+      const lead = await prisma.lead.findFirst({
+        where: {
+          phone: { contains: normalizedPhone.slice(-10) },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (lead) {
+        clientId = lead.clientId;
+        leadId = lead.id;
+      }
+    }
+
+    // Fall back: find by call_control_id → providerCallId
+    if (!clientId && call_control_id) {
+      const call = await prisma.call.findFirst({
+        where: { providerCallId: call_control_id },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (call) {
+        clientId = call.clientId;
+        leadId = call.leadId;
+      }
+    }
+
+    if (!clientId) {
+      // Still save — use a fallback unknown client log
+      console.warn('[booking] Could not find client for booking — saving without clientId');
+      await createAuditLog('BOOKING_UNMATCHED', `Unmatched booking: ${lead_phone}`, undefined, {
+        lead_name, lead_email, lead_phone, appointment_date, appointment_time, call_control_id,
+      });
+      res.json({ result: 'booked', message: `Got it! Your appointment request has been recorded.` });
+      return;
+    }
+
+    // Save the booking
+    await (prisma as any).booking.create({
+      data: {
+        clientId,
+        leadId: leadId || undefined,
+        name: lead_name || null,
+        email: lead_email || null,
+        phone: lead_phone || null,
+        businessName: business_name || null,
+        city: city || null,
+        appointmentDate: appointment_date || null,
+        appointmentTime: appointment_time || null,
+        notes: notes || null,
+        status: 'PENDING',
+      },
+    });
+
+    await createAuditLog('BOOKING_CREATED', `Booking saved: ${lead_name} — ${business_name} (${city}) on ${appointment_date} at ${appointment_time}`, clientId, {
+      leadId, lead_name, lead_email, lead_phone, business_name, city, appointment_date, appointment_time,
+    });
+
+    console.log(`[booking] ✓ Saved for client ${clientId} | ${lead_name} | ${appointment_date} ${appointment_time}`);
+
+    const dateStr = appointment_date ? ` for ${appointment_date}` : '';
+    const timeStr = appointment_time ? ` at ${appointment_time}` : '';
+    res.json({ result: 'booked', message: `Perfect! Your appointment has been booked${dateStr}${timeStr}. Joshua will reach out to confirm shortly.` });
+  } catch (err: any) {
+    console.error('[booking] Error:', err.message);
+    res.status(500).json({ result: 'error', message: 'Unable to save booking. Please try again.' });
   }
 });
 
