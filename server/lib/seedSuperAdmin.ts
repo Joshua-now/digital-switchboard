@@ -72,6 +72,15 @@ async function seedAITeammatesUser(): Promise<void> {
     });
     console.log(`[seed] AI Teammates user created: ${AI_TEAMMATES_EMAIL}`);
   }
+
+  // Claim any orphaned clients (agencyId = NULL) — these are pre-migration records that belong to AI Teammates
+  const claimed = await prisma.client.updateMany({
+    where: { agencyId: null },
+    data: { agencyId: agency.id },
+  });
+  if (claimed.count > 0) {
+    console.log(`[seed] Claimed ${claimed.count} orphaned client(s) for AI Teammates agency`);
+  }
 }
 
 export async function seedSuperAdmin(): Promise<void> {
