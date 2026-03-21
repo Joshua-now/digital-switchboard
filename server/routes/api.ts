@@ -774,4 +774,42 @@ router.patch('/admin/agencies/:id', requireAuth, requireSuperAdmin, async (req: 
   }
 });
 
+// One-time super admin setup — only works when no SUPER_ADMIN exists yet
+router.post('/admin/init', async (req: AuthRequest, res: Response) => {
+  try {
+    const { email, password, setupKey } = req.body;
+    const expectedKey = process.env.SETUP_KEY;
+
+    if (!expectedKey) {
+      res.status(403).json({ error: 'Setup not enabled (SETUP_KEY not configured)' });
+      return;
+    }
+    if (setupKey !== expectedKey) {
+      res.status(403).json({ error: 'Invalid setup key' });
+      return;
+    }
+    if (!email?.trim() || !password) {
+      res.status(400).json({ error: 'email and password required' });
+      return;
+    }
+
+    const existingSuperAdmin = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' } });
+    if (existingSuperAdmin) {
+      res.status(409).json({ error: 'Super admin already exists', email: existingSuperAdmin.email });
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.user.create({
+      data: { email: email.toLowerCase().trim(), passwordHash, name: 'Super Admin', role: 'SUPER_ADMIN', agencyId: null },
+    });
+
+    console.log(`[init] Super admin created: ${user.email}`);
+    res.status(201).json({ success: true, email: user.email });
+  } catch (err) {
+    console.error('Init error:', err);
+    res.status(500).json({ error: 'Failed to create super admin' });
+  }
+});
+
 export default router;
