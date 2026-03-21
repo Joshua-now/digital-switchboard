@@ -151,6 +151,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS "leads_client_id_dedupe_key_key" ON "leads"("c
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "calls_provider_call_id_key" ON "calls"("provider_call_id");
 
+-- Add new columns to existing tables (safe — ignores if column already exists)
+DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "name" TEXT NOT NULL DEFAULT 'Default'; EXCEPTION WHEN duplicate_column THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "bland_agent_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "vapi_assistant_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
+DO $$ BEGIN ALTER TABLE "clients" ADD COLUMN "agency_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
+
 -- AddForeignKey (idempotent)
 DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN ALTER TABLE "clients" ADD CONSTRAINT "clients_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
