@@ -1,22 +1,13 @@
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "AgencyStatus" AS ENUM ('ACTIVE', 'SUSPENDED');
+-- Baseline migration — safe to run on existing databases (all statements use IF NOT EXISTS)
 
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "UserRole" AS ENUM ('SUPER_ADMIN', 'AGENCY_ADMIN');
+-- CreateEnum (safe)
+DO $$ BEGIN CREATE TYPE "AgencyStatus" AS ENUM ('ACTIVE', 'SUSPENDED'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'AGENCY_ADMIN'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "ClientStatus" AS ENUM ('ACTIVE', 'INACTIVE'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "CallProvider" AS ENUM ('BLAND', 'VAPI', 'TELNYX'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "CallStatus" AS ENUM ('NEW', 'QUEUED', 'CALLING', 'COMPLETED', 'FAILED', 'SKIPPED'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "CallStatusEnum" AS ENUM ('CREATED', 'IN_PROGRESS', 'COMPLETED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "ClientStatus" AS ENUM ('ACTIVE', 'INACTIVE');
-
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "CallProvider" AS ENUM ('BLAND', 'VAPI', 'TELNYX');
-
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "CallStatus" AS ENUM ('NEW', 'QUEUED', 'CALLING', 'COMPLETED', 'FAILED', 'SKIPPED');
-
--- CreateEnum
-CREATE TYPE IF NOT EXISTS "CallStatusEnum" AS ENUM ('CREATED', 'IN_PROGRESS', 'COMPLETED', 'FAILED');
-
--- CreateTable
 CREATE TABLE IF NOT EXISTS "agencies" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -26,7 +17,6 @@ CREATE TABLE IF NOT EXISTS "agencies" (
     CONSTRAINT "agencies_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT NOT NULL,
     "agency_id" TEXT,
@@ -39,7 +29,6 @@ CREATE TABLE IF NOT EXISTS "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "clients" (
     "id" TEXT NOT NULL,
     "agency_id" TEXT,
@@ -54,7 +43,6 @@ CREATE TABLE IF NOT EXISTS "clients" (
     CONSTRAINT "clients_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "routing_configs" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -75,7 +63,6 @@ CREATE TABLE IF NOT EXISTS "routing_configs" (
     CONSTRAINT "routing_configs_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "leads" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -92,7 +79,6 @@ CREATE TABLE IF NOT EXISTS "leads" (
     CONSTRAINT "leads_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "calls" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -110,7 +96,6 @@ CREATE TABLE IF NOT EXISTS "calls" (
     CONSTRAINT "calls_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "bookings" (
     "id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
@@ -128,7 +113,6 @@ CREATE TABLE IF NOT EXISTS "bookings" (
     CONSTRAINT "bookings_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE IF NOT EXISTS "audit_logs" (
     "id" TEXT NOT NULL,
     "client_id" TEXT,
@@ -139,25 +123,11 @@ CREATE TABLE IF NOT EXISTS "audit_logs" (
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
-
--- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "clients_ghl_location_id_key" ON "clients"("ghl_location_id");
-
--- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "leads_client_id_dedupe_key_key" ON "leads"("client_id", "dedupe_key");
-
--- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "calls_provider_call_id_key" ON "calls"("provider_call_id");
 
--- Add new columns to existing tables (safe — ignores if column already exists)
-DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "name" TEXT NOT NULL DEFAULT 'Default'; EXCEPTION WHEN duplicate_column THEN null; END $$;
-DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "bland_agent_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
-DO $$ BEGIN ALTER TABLE "routing_configs" ADD COLUMN "vapi_assistant_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
-DO $$ BEGIN ALTER TABLE "clients" ADD COLUMN "agency_id" TEXT; EXCEPTION WHEN duplicate_column THEN null; END $$;
-
--- AddForeignKey (idempotent)
 DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN ALTER TABLE "clients" ADD CONSTRAINT "clients_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "agencies"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN ALTER TABLE "routing_configs" ADD CONSTRAINT "routing_configs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
