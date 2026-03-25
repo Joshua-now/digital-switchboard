@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { Phone, Filter, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Phone, Filter, ExternalLink, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface Call {
@@ -76,6 +76,17 @@ export default function Calls() {
   useEffect(() => {
     loadCalls();
   }, [loadCalls]);
+
+  const handleDeleteCall = async (id: string) => {
+    if (!confirm('Delete this call record?')) return;
+    try {
+      await api.calls.delete(id);
+      loadCalls();
+    } catch (err) {
+      console.error('Failed to delete call:', err);
+      alert('Failed to delete call');
+    }
+  };
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -213,12 +224,20 @@ export default function Calls() {
                         {new Date(call.createdAt).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => setSelectedCall(call)}
-                          className="text-blue-600 hover:text-blue-700 font-medium text-sm"
-                        >
-                          Details
-                        </button>
+                        <div className="inline-flex items-center gap-3">
+                          <button
+                            onClick={() => setSelectedCall(call)}
+                            className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+                          >
+                            Details
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCall(call.id)}
+                            className="inline-flex items-center gap-1 text-red-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

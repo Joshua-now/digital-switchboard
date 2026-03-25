@@ -208,6 +208,10 @@ export const api = {
           method: "PATCH",
           body: data,
         }),
+      delete: (id: string) =>
+        fetchApi<{ success: boolean }>(`/api/admin/agencies/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
     },
   },
 

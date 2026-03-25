@@ -582,6 +582,25 @@ router.get('/leads/:id', requireAuth, async (req: AuthRequest, res: Response) =>
   }
 });
 
+router.delete('/leads/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const scope = agencyScope(req.user!);
+    const where: any = { id: req.params.id };
+    if (scope.agencyId) where.client = { agencyId: scope.agencyId };
+
+    const lead = await prisma.lead.findFirst({ where });
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+    await prisma.lead.delete({ where: { id: lead.id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting lead:', err);
+    res.status(500).json({ error: 'Failed to delete lead' });
+  }
+});
+
 // ─── Calls ────────────────────────────────────────────────────────────────────
 
 router.get('/calls', requireAuth, async (req: AuthRequest, res: Response) => {
@@ -612,6 +631,25 @@ router.get('/calls', requireAuth, async (req: AuthRequest, res: Response) => {
   } catch (err) {
     console.error('Error fetching calls:', err);
     res.status(500).json({ error: 'Failed to fetch calls' });
+  }
+});
+
+router.delete('/calls/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const scope = agencyScope(req.user!);
+    const where: any = { id: req.params.id };
+    if (scope.agencyId) where.client = { agencyId: scope.agencyId };
+
+    const call = await prisma.call.findFirst({ where });
+    if (!call) {
+      res.status(404).json({ error: 'Call not found' });
+      return;
+    }
+    await prisma.call.delete({ where: { id: call.id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting call:', err);
+    res.status(500).json({ error: 'Failed to delete call' });
   }
 });
 
@@ -774,6 +812,28 @@ router.patch('/admin/agencies/:id', requireAuth, requireSuperAdmin, async (req: 
   }
 });
 
+router.delete('/admin/agencies/:id', requireAuth, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const agency = await prisma.agency.findUnique({ where: { id } });
+    if (!agency) {
+      res.status(404).json({ error: 'Agency not found' });
+      return;
+    }
+    // Delete clients first (cascades to leads, calls, routing configs, etc.)
+    await prisma.client.deleteMany({ where: { agencyId: id } });
+    // Delete users associated with this agency
+    await prisma.user.deleteMany({ where: { agencyId: id } });
+    // Now delete the agency itself
+    await prisma.agency.delete({ where: { id } });
+    await createAuditLog('AGENCY_DELETED', `Agency deleted: ${agency.name}`, id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting agency:', err);
+    res.status(500).json({ error: 'Failed to delete agency' });
+  }
+});
+
 // One-time super admin setup — only works when no SUPER_ADMIN exists yet
 router.post('/admin/init', async (req: AuthRequest, res: Response) => {
   try {
@@ -810,6 +870,11 @@ router.post('/admin/init', async (req: AuthRequest, res: Response) => {
     console.error('Init error:', err);
     res.status(500).json({ error: 'Failed to create super admin' });
   }
+});
+
+// Health check — used by monitoring and Railway health checks
+router.get('/health', (_req, res) => {
+  res.json({ status: 'ok', ts: new Date().toISOString(), service: 'switchboard-api' });
 });
 
 export default router;

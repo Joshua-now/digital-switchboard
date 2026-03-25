@@ -242,25 +242,45 @@ router.post('/gohighlevel/config/:configId', async (req: Request, res: Response)
   }
 });
 
-// ─── GoHighLevel per-client webhook (legacy — picks first active config) ───────
+// ─── GoHighLevel per-client webhook ────────────────────────────────────────────
 router.post('/gohighlevel/:clientId', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   try {
     const client = await prisma.client.findUnique({
       where: { id: clientId },
-      include: { routingConfigs: { where: { active: true }, orderBy: { createdAt: 'asc' }, take: 1 } },
+      include: { routingConfigs: { where: { active: true }, orderBy: { createdAt: 'asc' } } },
     });
     if (!client) {
       await createAuditLog('WEBHOOK_ERROR', `Client not found: ${clientId}`, undefined, { clientId });
       res.status(404).json({ error: 'Client not found' });
       return;
     }
-    const routingConfig = client.routingConfigs[0];
+
+    // Match routing config by product name from payload, fall back to first active
+    const payload = req.body;
+    const product: string = (
+      payload.product ||
+      payload.customData?.product ||
+      payload.custom_data?.product ||
+      payload.fields?.product ||
+      ''
+    ).trim();
+
+    let routingConfig = client.routingConfigs[0];
+    if (product && client.routingConfigs.length > 1) {
+      const match = client.routingConfigs.find(
+        (r) => r.name.toLowerCase() === product.toLowerCase()
+      );
+      if (match) routingConfig = match;
+    }
+
     if (!routingConfig) {
       res.status(200).json({ message: 'Lead received but no active routing config' });
       return;
     }
-    await processGhlWebhook(clientId, client, routingConfig, req.body, res);
+
+    console.log(`[webhook] product="${product}" → routing config "${routingConfig.name}"`);
+    await processGhlWebhook(clientId, client, routingConfig, payload, res);
   } catch (error: any) {
     console.error('Webhook error:', error);
     await createAuditLog('WEBHOOK_ERROR', error.message, clientId, { error: error.message });

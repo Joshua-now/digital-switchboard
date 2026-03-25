@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { Database, Filter, Eye, Search, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Database, Filter, Eye, Search, ChevronLeft, ChevronRight, X, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface Lead {
@@ -89,6 +89,17 @@ export default function Leads() {
   useEffect(() => {
     loadLeads();
   }, [loadLeads]);
+
+  const handleDeleteLead = async (id: string) => {
+    if (!confirm('Delete this lead and all its calls?')) return;
+    try {
+      await api.leads.delete(id);
+      loadLeads();
+    } catch (err) {
+      console.error('Failed to delete lead:', err);
+      alert('Failed to delete lead');
+    }
+  };
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -234,13 +245,21 @@ export default function Leads() {
                         {new Date(lead.createdAt).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => setSelectedLead(lead)}
-                          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
-                        >
-                          <Eye className="w-4 h-4" />
-                          View
-                        </button>
+                        <div className="inline-flex items-center gap-3">
+                          <button
+                            onClick={() => setSelectedLead(lead)}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
+                          >
+                            <Eye className="w-4 h-4" />
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDeleteLead(lead.id)}
+                            className="inline-flex items-center gap-1 text-red-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import {
   Building2, Users, RefreshCw, CheckCircle, XCircle,
-  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck, ExternalLink, Search,
+  ChevronDown, ChevronRight, Phone, PhoneCall, UserCheck, ExternalLink, Search, Trash2,
 } from 'lucide-react';
 
 type AgencyClient = {
@@ -30,6 +30,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
@@ -66,6 +67,22 @@ export default function Admin() {
       alert(err?.message || 'Failed to update agency');
     } finally {
       setToggling(null);
+    }
+  };
+
+  const deleteAgency = async (agency: Agency) => {
+    const confirmed = window.confirm(
+      `Delete "${agency.name}"?\n\nThis permanently removes the agency, all its users, clients, leads, and calls. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setDeleting(agency.id);
+    try {
+      await api.admin.agencies.delete(agency.id);
+      setAgencies((prev) => prev.filter((a) => a.id !== agency.id));
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete agency');
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -262,6 +279,16 @@ export default function Admin() {
                         : agency.status === 'ACTIVE'
                         ? 'Suspend'
                         : 'Activate'}
+                    </button>
+
+                    {/* Delete button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteAgency(agency); }}
+                      disabled={deleting === agency.id}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+                      title="Delete agency permanently"
+                    >
+                      {deleting === agency.id ? '…' : <Trash2 size={13} />}
                     </button>
                   </div>
 
